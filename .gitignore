@@ -1,0 +1,11 @@
+.build/
+.DS_Store
+.swiftpm/
+.env
+.env.*
+!.env.example
+*.log
+*.xcuserstate
+projects.json
+events.sock
+claude-hooks.json
