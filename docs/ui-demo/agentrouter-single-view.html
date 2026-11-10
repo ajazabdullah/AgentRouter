@@ -1,0 +1,135 @@
+<div id="ar-layout-demo">
+<style>
+#ar-layout-demo{--ar-bg:light-dark(#f5f5f7,#202124);--ar-panel:light-dark(#fff,#2a2b2e);--ar-text:light-dark(#202124,#efeff2);--ar-sub:light-dark(#555963,#b9bdc7);--ar-line:light-dark(#dedee4,#45464d);--ar-accent:light-dark(#155dd5,#91b9ff);--ar-onaccent:light-dark(#fff,#142540);--ar-soft:light-dark(#e8f0ff,#273951);--ar-green:light-dark(#16743c,#83d4a0);--ar-radius:14px;color:var(--ar-text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;gap:20px}
+#ar-layout-demo *{box-sizing:border-box}
+#ar-layout-demo [hidden]{display:none!important}
+#ar-layout-demo .ar-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;background:var(--ar-panel);border:1px solid var(--ar-line);border-radius:10px;flex-wrap:wrap}
+#ar-layout-demo .ar-shell{background:var(--ar-bg);border:1px solid var(--ar-line);border-radius:18px;overflow:hidden}
+#ar-layout-demo .ar-header{padding:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--ar-line);flex-wrap:wrap}
+#ar-layout-demo h2,#ar-layout-demo h3,#ar-layout-demo p{margin:0}
+#ar-layout-demo h2{font-size:22px;font-weight:500}
+#ar-layout-demo h3{font-size:18px;font-weight:500}
+#ar-layout-demo .ar-muted{color:var(--ar-sub);font-size:15px}
+#ar-layout-demo .ar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#ar-layout-demo button{font:inherit;padding:8px 12px;border-radius:9px;background:var(--ar-panel);color:var(--ar-text);border:1px solid var(--ar-line)}
+#ar-layout-demo button[aria-pressed=true]{background:var(--ar-soft);color:var(--ar-accent);border-color:var(--ar-accent)}
+#ar-layout-demo button.ar-primary{background:var(--ar-accent);color:var(--ar-onaccent);border-color:var(--ar-accent)}
+#ar-layout-demo button:disabled{opacity:.55}
+#ar-layout-demo .ar-main{padding:20px;display:grid;gap:22px}
+#ar-layout-demo .ar-group{display:grid;gap:12px;min-width:0}
+#ar-layout-demo .ar-projects{display:grid;gap:10px}
+#ar-layout-demo .ar-project{display:flex;align-items:flex-start;gap:8px;background:var(--ar-panel);border:1px solid var(--ar-line);border-radius:var(--ar-radius);padding:12px}
+#ar-layout-demo .ar-project.is-active{box-shadow:inset 3px 0 var(--ar-accent)}
+#ar-layout-demo .ar-project-main{flex:1;min-width:0;display:grid;gap:8px}
+#ar-layout-demo .ar-project-select{display:flex;justify-content:space-between;gap:10px;text-align:left;border:0;padding:0;background:transparent;flex-wrap:wrap}
+#ar-layout-demo .ar-project-select strong{font-weight:500;overflow-wrap:anywhere}
+#ar-layout-demo .ar-project-select small{font-size:15px;color:var(--ar-sub)}
+#ar-layout-demo .ar-chips{display:flex;flex-wrap:wrap;gap:8px}
+#ar-layout-demo .ar-section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+#ar-layout-demo .ar-target{color:var(--ar-accent);overflow-wrap:anywhere}
+#ar-layout-demo textarea,#ar-layout-demo select,#ar-layout-demo input{font:inherit;border:1px solid var(--ar-line);border-radius:10px;background:var(--ar-panel);color:var(--ar-text);padding:10px;max-width:100%;width:100%}
+#ar-layout-demo textarea{resize:vertical;min-height:100px}
+#ar-layout-demo .ar-output{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--ar-panel);border:1px solid var(--ar-line);padding:16px;border-radius:var(--ar-radius);margin:0;min-height:150px;font:16px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+#ar-layout-demo .ar-footer{padding:12px 20px;border-top:1px solid var(--ar-line);color:var(--ar-sub);font-size:15px;overflow-wrap:anywhere}
+#ar-layout-demo .ar-settings{padding:20px;display:grid;gap:18px}
+#ar-layout-demo label{display:grid;gap:7px}
+#ar-layout-demo .ar-check{display:flex;align-items:center;gap:10px}
+#ar-layout-demo .ar-check input{width:auto}
+#ar-layout-demo .ar-config{display:grid;gap:12px}
+#ar-layout-demo .ar-config textarea{min-height:300px;font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#ar-layout-demo .ar-error{color:light-dark(#a42323,#ffb3b3)}
+#ar-layout-demo .ar-gear svg{vertical-align:middle}
+@media(max-width:480px){#ar-layout-demo .ar-header,#ar-layout-demo .ar-main,#ar-layout-demo .ar-settings{padding:14px}#ar-layout-demo .ar-header .ar-actions{width:100%}#ar-layout-demo .ar-project-select{display:grid}}
+</style>
+<div class="ar-bar" aria-label="Simulated macOS menu bar"><span>macOS menu bar</span><span class="ar-actions"><button type="button" data-action="open" data-active-menu>Project 1</button><button type="button" class="ar-primary" data-action="toggle">AR</button></span></div>
+<section class="ar-shell" aria-label="AgentRouter proposed single view">
+  <header class="ar-header"><h2>AgentRouter</h2><div class="ar-actions">
+    <button type="button" data-action="history" aria-label="Notification history"><i data-lucide="bell" aria-hidden="true"></i></button>
+    <button type="button" data-action="app-settings" aria-label="App settings"><i data-lucide="settings-2" aria-hidden="true"></i></button>
+    <button type="button" data-action="hide" aria-label="Hide AgentRouter"><i data-lucide="minus" aria-hidden="true"></i></button>
+    <button type="button" data-action="quit">Quit…</button>
+  </div></header>
+  <main class="ar-main">
+    <section class="ar-group" data-block="projects"><div class="ar-section-head"><h3>Projects</h3><button type="button" data-action="add">+ Add project</button></div><div class="ar-projects"></div></section>
+    <section class="ar-group" data-block="prompt"><div class="ar-section-head"><h3 data-label="prompt">Prompt</h3><span class="ar-target"></span></div>
+      <textarea class="ar-prompt" aria-label="Prompt preview">Improve the empty state and explain the changes.</textarea>
+      <div class="ar-actions"><button type="button" class="ar-primary" data-action="send">Send &amp; Open CLI</button><button type="button" data-action="paste">Paste Only</button><button type="button" data-action="open">Open CLI</button></div>
+      <span class="ar-muted" data-readiness></span>
+    </section>
+    <section class="ar-group" data-block="output"><div class="ar-section-head"><h3 data-label="output">CLI output</h3><div class="ar-actions"><button type="button" data-action="refresh">Refresh</button><button type="button" data-action="copy">Copy Output</button></div></div>
+      <label class="ar-muted">View output <select class="ar-output-select" aria-label="View CLI output"></select></label>
+      <pre class="ar-output" aria-label="Agent output"></pre>
+    </section>
+  </main>
+  <section class="ar-settings" hidden aria-label="Project settings"></section>
+  <footer class="ar-footer" aria-live="polite">Simulation only · No real CLIs or settings are changed.</footer>
+</section>
+<details class="ar-config" open><summary>Editable layout JSON</summary><label>Placement and notes<textarea class="ar-json" spellcheck="false" aria-label="Editable layout JSON"></textarea></label><div class="ar-actions"><button type="button" class="ar-primary" data-action="apply">Apply layout</button><span class="ar-muted">Edit main.order or add notes to any section.</span></div><div class="ar-error" role="alert"></div></details>
+<script>
+(()=>{
+const root=document.getElementById('ar-layout-demo');
+const $=s=>root.querySelector(s);
+const defaults={version:1,menuBar:{label:'AR',alwaysVisible:true,separateProjectItem:true},main:{order:['projects','prompt','output'],navigationTabs:false,destinationDropdown:false,projectSelection:'click-project-row',cliSelection:'chips-in-selected-project-row',bodyFontPt:16,supportingFontPt:15},projectGear:{sections:['agent-controls','project-configuration','side-by-side','notification-preferences'],actions:['start','open-cli','stop','restart','new-cli'],notes:''},prompt:{title:'Prompt',primaryAction:'Send & Open CLI',secondaryAction:'Paste Only',showSelectedProjectAndCLI:true,showClipboardPreview:true,notes:''},output:{title:'CLI output',actions:['Copy Output','Refresh'],allowViewingAnotherCLI:false,selection:'follows-selected-project-and-cli',notes:''},header:{actions:['history','app-settings','hide','quit'],notes:''},notes:'Edit main.order to rearrange projects, prompt and output. Add placement requests in any notes field. Design demo only.'};
+const projects=[{id:'project1',name:'Project 1',state:'Ready',clis:['Codex · Main','Claude · CLI 2']},{id:'video',name:'Project 2',state:'Stopped',clis:['Codex · Main']},{id:'pin',name:'Project 3',state:'Working',clis:['Codex · Main']}];
+let config=structuredClone(defaults), selected='project1', selectedCLI=0, outputChoice='follow', samples={};
+const saved=window.openai?.widgetState;
+if(saved?.modelContent?.layout)config=saved.modelContent.layout;
+if(saved?.privateContent?.selected && projects.some(p=>p.id===saved.privateContent.selected))selected=saved.privateContent.selected;
+function persist(){window.openai?.setWidgetState?.({modelContent:{layout:config},privateContent:{selected}})?.catch(()=>{});}
+function note(text){$('.ar-footer').textContent='Simulation only · '+text;}
+function active(){return projects.find(p=>p.id===selected);}
+function iconize(){globalThis.lucide?.createIcons({attrs:{width:18,height:18}});}
+function button(text,action){const b=document.createElement('button');b.type='button';b.textContent=text;b.addEventListener('click',action);return b;}
+function render(){
+ const list=$('.ar-projects');list.replaceChildren();
+ projects.forEach(p=>{
+  const row=document.createElement('div');row.className='ar-project'+(p.id===selected?' is-active':'');
+  const content=document.createElement('div');content.className='ar-project-main';
+  const choose=button('',()=>{selected=p.id;selectedCLI=0;render();persist();note('Selected '+p.name+'.');});choose.className='ar-project-select';choose.setAttribute('aria-pressed',String(p.id===selected));
+  const name=document.createElement('strong');name.textContent=p.name;const status=document.createElement('small');status.textContent=p.state+' · '+p.clis.length+' configured';choose.append(name,status);content.append(choose);
+  if(p.id===selected){const chips=document.createElement('div');chips.className='ar-chips';p.clis.forEach((c,i)=>{const chip=button(c,()=>{selectedCLI=i;render();persist();});chip.setAttribute('aria-pressed',String(i===selectedCLI));chips.append(chip);});content.append(chips);}
+  const gear=button('⚙',()=>showProjectSettings(p.id));gear.className='ar-gear';gear.setAttribute('aria-label',p.name+' settings');row.append(content,gear);list.append(row);
+ });
+ const validOrder=Array.isArray(config.main?.order)?config.main.order:defaults.main.order;
+ const main=$('.ar-main');validOrder.forEach(key=>{const node=root.querySelector('[data-block="'+key+'"]');if(node)main.append(node);});
+ const p=active();$('[data-active-menu]').textContent=p.name;$('[data-active-menu]').hidden=p.state==='Stopped';$('.ar-target').textContent=config.prompt?.showSelectedProjectAndCLI===false?'':p.name+' → '+p.clis[selectedCLI];
+ $('[data-label="prompt"]').textContent=config.prompt?.title||'Prompt';$('[data-label="output"]').textContent=config.output?.title||'CLI output';
+ $('[data-action="send"]').textContent=config.prompt?.primaryAction||'Send & Open CLI';$('[data-action="paste"]').textContent=config.prompt?.secondaryAction||'Paste Only';
+ $('.ar-prompt').hidden=config.prompt?.showClipboardPreview===false;
+ $('[data-action="send"]').disabled=p.state==='Working';
+ $('[data-readiness]').textContent=p.state==='Ready'?'Ready · Submission requires a verified idle signal.':p.state==='Working'?'Busy · Submission blocked. Open CLI for manual interaction.':'Stopped · Sending will offer to start this CLI first.';
+ const select=$('.ar-output-select');select.replaceChildren();const follow=document.createElement('option');follow.value='follow';follow.textContent='Selected project / CLI';select.append(follow);
+ projects.forEach(project=>project.clis.forEach((cli,i)=>{const o=document.createElement('option');o.value=project.id+':'+i;o.textContent=project.name+' · '+cli;select.append(o);}));
+ select.value=outputChoice;select.parentElement.hidden=config.output?.allowViewingAnotherCLI===false;
+ renderOutput();$('.ar-json').value=JSON.stringify(config,null,2);iconize();
+}
+function renderOutput(){const p=outputChoice==='follow'?active():projects.find(p=>p.id===outputChoice.split(':')[0]);const i=outputChoice==='follow'?selectedCLI:Number(outputChoice.split(':')[1]);$('.ar-output').textContent=samples[p.id+':'+i]||('Sample output — '+p.name+' / '+p.clis[i]+'\n\n'+(p.state==='Stopped'?'No running CLI. Start it from this project’s ⚙ settings.':'Updated the empty state and improved readability.\n\nChanges are ready for your manual review.'));}
+function panel(title){const settings=$('.ar-settings');settings.replaceChildren();$('.ar-main').hidden=true;settings.hidden=false;const h=document.createElement('h3');h.textContent=title;settings.append(button('← Back to projects',()=>{settings.hidden=true;$('.ar-main').hidden=false;render();}),h);return settings;}
+function showProjectSettings(id){selected=id;selectedCLI=0;render();persist();const p=active(),el=panel(p.name+' settings');
+ (config.projectGear?.sections||defaults.projectGear.sections).forEach(section=>{
+ const group=document.createElement('section');group.className='ar-group';const heading=document.createElement('h3');heading.textContent=section.replaceAll('-',' ');group.append(heading);
+ if(section==='agent-controls'){const actions=document.createElement('div');actions.className='ar-actions';['Start','Open CLI','Stop','Restart','New CLI'].forEach(label=>actions.append(button(label,()=>{if(label==='Start'||label==='Restart')p.state='Ready';if(label==='Stop')p.state='Stopped';if(label==='New CLI')p.clis.push('Codex · CLI '+(p.clis.length+1));note(label+' simulated for '+p.name+'.');})));group.append(actions);}
+ if(section==='project-configuration'){const label=document.createElement('label');label.textContent='Project name';const input=document.createElement('input');input.value=p.name;input.addEventListener('change',()=>{p.name=input.value;note('Demo project name changed.');});label.append(input);group.append(label);const info=document.createElement('p');info.className='ar-muted';info.textContent='Working directory · CLI · Session · Codex launch permissions';group.append(info);}
+ if(section==='side-by-side'){const label=document.createElement('label');label.textContent='Second project / CLI';const select=document.createElement('select');projects.filter(q=>q.id!==p.id).forEach(q=>{const o=document.createElement('option');o.textContent=q.name;select.append(o);});label.append(select);group.append(label);const actions=document.createElement('div');actions.className='ar-actions';['Open Split View','Balance 50/50','Close Split View'].forEach(text=>actions.append(button(text,()=>note(text+' simulated.'))));group.append(actions);}
+ if(section==='notification-preferences'){const label=document.createElement('label');label.className='ar-check';const check=document.createElement('input');check.type='checkbox';check.checked=true;label.append(check,document.createTextNode('Notify for this project'));group.append(label);}
+ el.append(group);
+ });
+}
+$('.ar-output-select').addEventListener('change',e=>{outputChoice=e.target.value;renderOutput();});
+root.addEventListener('click',e=>{
+ const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
+ if(a==='apply'){try{const next=JSON.parse($('.ar-json').value);if(next.version!==1||!Array.isArray(next.main?.order)||next.main.order.length!==3||new Set(next.main.order).size!==3||next.main.order.some(k=>!['projects','prompt','output'].includes(k)))throw new Error('main.order must contain projects, prompt and output exactly once.');if(JSON.stringify(next).length>14000)throw new Error('Keep the layout under 14 KB.');config=next;$('.ar-error').textContent='';render();persist();note('Layout applied. Notes are retained in the JSON.');}catch(err){$('.ar-error').textContent=err.message;}return;}
+ if(a==='hide'){$('.ar-shell').hidden=true;return;}
+ if(a==='toggle'){$('.ar-shell').hidden=!$('.ar-shell').hidden;return;}
+ if(a==='send'){const p=active();if(p.state==='Stopped'){showProjectSettings(p.id);note('Stopped CLI: start it in project settings.');return;}samples[p.id+':'+selectedCLI]='Simulated reply — '+p.name+'\n\nReceived prompt:\n'+$('.ar-prompt').value+'\n\nNo real prompt was sent.';renderOutput();note('Send & Open CLI simulated for '+p.name+'.');return;}
+ if(a==='paste'||a==='open'||a==='refresh'||a==='copy'){note(({paste:'Paste Only',open:'Open CLI',refresh:'Refresh output',copy:'Copy Output'})[a]+' simulated for the displayed CLI.');return;}
+ if(a==='app-settings'){const el=panel('App settings');['Show widget automatically when copying','Hide widget after sending','Global CLI keyboard shortcuts'].forEach((text,i)=>{const label=document.createElement('label');label.className='ar-check';const check=document.createElement('input');check.type='checkbox';check.checked=i!==0;label.append(check,document.createTextNode(text));el.append(label);});return;}
+ if(a==='history'){const el=panel('Notification history');const p=document.createElement('p');p.textContent='Project 2 · TURN_FINISHED · 10:42 — Sample event';el.append(p);return;}
+ if(a==='quit'){const el=panel('Quit AgentRouter');['Export Checkpoint…','Keep Running & Quit','Stop Agents & Quit…','Cancel'].forEach(text=>el.append(button(text,()=>note(text+' simulated; no processes changed.'))));return;}
+ if(a==='add'){const el=panel('Add project');const label=document.createElement('label');label.textContent='Project name';const input=document.createElement('input');input.value='New project';label.append(input);el.append(label,button('Add demo project',()=>{projects.push({id:'demo-'+projects.length,name:input.value||'New project',state:'Stopped',clis:['Codex · Main']});$('.ar-settings').hidden=true;$('.ar-main').hidden=false;render();}));}
+});
+window.addEventListener('openai:set_globals',e=>{const state=e.detail?.globals?.widgetState;if(state?.modelContent?.layout){config=state.modelContent.layout;render();}});
+render();
+})();
+</script>
+</div>

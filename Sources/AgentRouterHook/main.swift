@@ -14,7 +14,7 @@ do {
         }
         let original = try JSONDecoder().decode([String: JSONValue].self, from: input)
         var payload: [String: JSONValue] = [:]
-        for key in ["hook_event_name", "session_id", "turn_id", "notification_type", "tool_name", "agent_id", "agent_type"] { payload[key] = original[key] }
+        for key in ["hook_event_name", "session_id", "transcript_path", "turn_id", "notification_type", "tool_name", "agent_id", "agent_type"] { payload[key] = original[key] }
         for key in ["last_assistant_message", "message"] {
             if let value = original[key]?.string { payload[key] = .string(String(value.prefix(4000))) }
         }

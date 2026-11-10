@@ -10,6 +10,14 @@ struct ManagedPane: Sendable {
     let outputGeneration: String
 }
 
+/// Captured before quit confirmation; a restarted/rebound CLI must never inherit consent.
+public struct QuitStopTarget: Sendable {
+    public let id: UUID
+    public let name: String
+    public let runID: String
+    public let paneID: String
+}
+
 public actor LifecycleManager {
     public static let defaultSocket = "agentrouter-managed-v2"
     private let tmux: String
@@ -23,6 +31,7 @@ public actor LifecycleManager {
     private var exitReported: Set<String> = []
     private var disconnectReported: Set<String> = []
     private var pendingNotifications: [HistoryEntry] = []
+    private var replyCache: [UUID: (run: String, session: String, stamp: LatestReply.Stamp, text: String)] = [:]
     // Printable separators survive tmux sanitization in Finder/Spotlight non-UTF-8 locales.
     private static let format = "#{session_name}|#{session_id}|#{pane_id}|#{pid}:#{start_time}|#{@ar_project}|#{@ar_run}|#{@ar_pane_run}|#{pane_pid}|#{pane_dead}|#{bracket_paste_flag}|#{pane_in_mode}|#{pane_input_off}|#{pane_dead_status}|#{pane_output_generation}"
 
@@ -37,7 +46,7 @@ public actor LifecycleManager {
     public func saveInitialSettings() throws { try persist() }
     private func persist() throws { try store.save(workspace) }
     private func project(_ id: UUID) throws -> Project {
-        guard let p = workspace.projects.first(where: { $0.id == id }) else { throw RouterError.message("Project no longer exists.") }; return p
+        guard let p = workspace.controllers.first(where: { $0.id == id }) else { throw RouterError.message("Project or CLI no longer exists.") }; return p
     }
     private func run(_ args: [String], input: Data? = nil) throws -> String {
         let r = try ProcessRunner.run(tmux, ["-L", socket, "-f", "/dev/null"] + args, input: input)
@@ -90,7 +99,20 @@ public actor LifecycleManager {
     }
     public func saveProject(_ p: Project) throws {
         try p.validate()
-        guard !workspace.projects.contains(where: { $0.id != p.id && $0.session == p.session }) else { throw RouterError.message("Another project already uses this session identifier.") }
+        var retiredChildren: [UUID] = []
+        guard !workspace.instances.contains(where: { $0.id == p.id }) else { throw RouterError.message("Edit the parent project's settings; each additional CLI keeps its own executable and session.") }
+        guard !workspace.controllers.contains(where: { $0.id != p.id && $0.session == p.session }) else { throw RouterError.message("Another CLI already uses this session identifier.") }
+        if let before = workspace.projects.first(where: { $0.id == p.id }), before.directory != p.directory {
+            let all = try panes()
+            for instance in workspace.instances where instance.projectID == p.id {
+                if let binding = workspace.bindings[instance.id.uuidString], all.contains(where: { $0.session == instance.session }) {
+                    guard try ownedPane(project(instance.id), binding, from: all).dead else {
+                        throw RouterError.message("Stop every CLI in this project before changing its directory.")
+                    }
+                }
+            }
+            retiredChildren = workspace.instances.filter { $0.projectID == p.id }.map(\.id)
+        }
         if let b = workspace.bindings[p.id.uuidString] {
             let before = try project(p.id)
             let all = try panes()
@@ -100,15 +122,47 @@ public actor LifecycleManager {
                 if pane.dead && (p.directory != before.directory || p.cli != before.cli || p.executable != before.executable || p.session != before.session) { try release(p.id) }
             } else { workspace.bindings.removeValue(forKey: p.id.uuidString) }
         }
+        for child in retiredChildren where workspace.bindings[child.uuidString] != nil { try release(child) }
         if let index = workspace.projects.firstIndex(where: { $0.id == p.id }) { workspace.projects[index] = p }
         else { workspace.projects.append(p) }
         try persist()
     }
     public func removeProject(_ id: UUID) throws {
         _ = try project(id)
-        if workspace.bindings[id.uuidString] != nil { try release(id) }
-        workspace.projects.removeAll { $0.id == id }; live[id] = nil
+        let targets = [id] + workspace.instances.filter { $0.projectID == id }.map(\.id)
+        let all = try panes()
+        for target in targets {
+            let p = try project(target)
+            if let b = workspace.bindings[target.uuidString], all.contains(where: { $0.session == p.session }) {
+                guard try ownedPane(p, b, from: all).dead else { throw RouterError.message("Stop all affected CLIs before removing this project or CLI.") }
+            }
+        }
+        for target in targets {
+            if workspace.bindings[target.uuidString] != nil { try release(target) }
+            live[target] = nil; replyCache[target] = nil
+        }
+        workspace.projects.removeAll { $0.id == id }
+        workspace.instances.removeAll { $0.id == id || $0.projectID == id }
         try persist()
+    }
+    public func addCLI(projectID: UUID, cli: CLIKind) throws -> UUID {
+        guard let root = workspace.projects.first(where: { $0.id == projectID }) else { throw RouterError.message("Select a project before creating another CLI.") }
+        let names = Set(workspace.instances.filter { $0.projectID == projectID }.map(\.name))
+        var ordinal = root.cli == cli ? 2 : 1
+        while names.contains("\(cli.title) \(ordinal)") { ordinal += 1 }
+        let instance = AgentInstance(projectID: projectID, name: "\(cli.title) \(ordinal)", cli: cli,
+                                     executable: root.cli == cli ? root.executable : cli.detectedPath)
+        var target = Project(id: instance.id, name: instance.name, directory: root.directory, cli: cli,
+                             executable: instance.executable, session: instance.session)
+        target.codexSettings = root.codexSettings
+        try target.validate()
+        guard !workspace.controllers.contains(where: { $0.session == instance.session }) else { throw RouterError.message("New CLI session collision; nothing was started.") }
+        let previousVersion = workspace.version
+        workspace.version = 3
+        workspace.instances.append(instance)
+        do { try persist() }
+        catch { workspace.instances.removeAll { $0.id == instance.id }; workspace.version = previousVersion; throw error }
+        return instance.id
     }
     /// Cleanup is permitted only for the exact dead controller pane, never a live or extra pane.
     private func release(_ id: UUID) throws {
@@ -144,6 +198,7 @@ public actor LifecycleManager {
         let placeholder = try panes().first { $0.sessionID == ids[0] && $0.paneID == ids[1] }
         guard let placeholder, placeholder.project == id.uuidString, placeholder.run == runID else { throw RouterError.message("New session ownership could not be established.") }
         var args = p.cli.arguments(mode: mode)
+        if p.cli == .codex { args += (p.codexSettings ?? CodexSettings()).arguments }
         if let hookHelper, let ipcPath {
             args += try HookConfiguration.arguments(for: p.cli, helper: hookHelper, directory: store.url.deletingLastPathComponent())
             _ = ipcPath
@@ -173,7 +228,7 @@ public actor LifecycleManager {
     public func health() throws -> [UUID: ProjectHealth] {
         let all = try panes(), processes = try ProcessTable.entries()
         var result: [UUID: ProjectHealth] = [:]
-        for p in workspace.projects {
+        for p in workspace.controllers {
             guard let b = workspace.bindings[p.id.uuidString] else {
                 let conflict = all.contains { $0.session == p.session }
                 result[p.id] = ProjectHealth(state: conflict ? .disconnected : .stopped, message: conflict ? "Unowned session name collision; start refused." : "Stopped. Configure a directory and press Start.")
@@ -209,8 +264,48 @@ public actor LifecycleManager {
         let group = try ProcessRunner.run("/bin/ps", ["-p", String(b.pid), "-o", "pgid="])
         guard group.status == 0, Int32(group.output.trimmingCharacters(in: .whitespacesAndNewlines)) == b.pid else { throw RouterError.message("Cannot verify the controller process group. No signal sent.") }
         _ = try ownedPane(p, b, from: panes())
+        let previousStopRequested = b.stopRequested
         b.stopRequested = true; workspace.bindings[id.uuidString] = b; live[id]?.revoke(); try persist()
-        guard kill(-b.pid, SIGTERM) == 0 else { throw RouterError.message("The graceful shutdown request failed: \(String(cString: strerror(errno)))") }
+        guard kill(-b.pid, SIGTERM) == 0 else {
+            let reason = String(cString: strerror(errno))
+            b.stopRequested = previousStopRequested; workspace.bindings[id.uuidString] = b; try? persist()
+            throw RouterError.message("The graceful shutdown request failed: \(reason)")
+        }
+    }
+    public func quitStopTargets() throws -> [QuitStopTarget] {
+        let all = try panes()
+        let processes = try ProcessTable.entries()
+        var targets: [QuitStopTarget] = []
+        for project in workspace.controllers {
+            guard let binding = workspace.bindings[project.id.uuidString] else {
+                guard !all.contains(where: { $0.session == project.session }) else {
+                    throw RouterError.message("\(project.name): unowned session collision. Nothing may be stopped by guessing its identity.")
+                }
+                continue
+            }
+            if !all.contains(where: { $0.session == project.session }) {
+                // A missing tmux session alone does not prove its controller exited.
+                if processes.contains(where: { $0.pid == binding.pid }),
+                   try ProcessTable.startTime(binding.pid) == binding.processStart {
+                    throw RouterError.message("\(project.name): the controller process is still alive but its pane is missing. Shutdown cannot be safely verified.")
+                }
+                continue
+            }
+            let pane = try ownedPane(project, binding, from: all)
+            if !pane.dead {
+                targets.append(QuitStopTarget(id: project.id, name: project.name, runID: binding.runID, paneID: binding.paneID))
+            }
+        }
+        return targets
+    }
+
+    public func requestQuitStop(_ target: QuitStopTarget, force: Bool) throws {
+        let current = try binding(target.id)
+        guard current.runID == target.runID, current.paneID == target.paneID else {
+            throw RouterError.message("\(target.name): the CLI run changed after confirmation. No stop signal was sent to the new run.")
+        }
+        if force { try forceStop(target.id, confirmed: true) }
+        else { try stop(target.id, confirmedInterrupt: true) }
     }
     public func forceStop(_ id: UUID, confirmed: Bool) throws {
         guard confirmed else { throw RouterError.message("Force stop requires explicit approval to discard active work.") }
@@ -218,10 +313,14 @@ public actor LifecycleManager {
         let pane = try ownedPane(p, b, from: panes())
         if !pane.dead {
             let group = try ProcessRunner.run("/bin/ps", ["-p", String(b.pid), "-o", "pgid="])
-            guard Int32(group.output.trimmingCharacters(in: .whitespacesAndNewlines)) == b.pid else { throw RouterError.message("Cannot verify the owned process group.") }
+            guard group.status == 0, Int32(group.output.trimmingCharacters(in: .whitespacesAndNewlines)) == b.pid else { throw RouterError.message("Cannot verify the owned process group.") }
             _ = try ownedPane(p, b, from: panes())
+            let previousStopRequested = b.stopRequested
             b.stopRequested = true; workspace.bindings[id.uuidString] = b; try persist()
-            guard kill(-b.pid, SIGKILL) == 0 else { throw RouterError.message("Force stop signal failed.") }
+            guard kill(-b.pid, SIGKILL) == 0 else {
+                b.stopRequested = previousStopRequested; workspace.bindings[id.uuidString] = b; try? persist()
+                throw RouterError.message("Force stop signal failed.")
+            }
         }
         live[id]?.revoke()
     }
@@ -253,6 +352,28 @@ public actor LifecycleManager {
         _ = try ownedPane(p, b, from: panes())
         return TerminalTarget(command: command, attachedTTYs: ttys)
     }
+    public func splitViewTarget(first: UUID, second: UUID, balance: Bool = false) throws -> TerminalTarget {
+        guard first != second else { throw RouterError.message("Choose two different projects for Split View.") }
+        let left = try project(first), right = try project(second)
+        let leftBinding = try binding(first), rightBinding = try binding(second)
+        let all = try panes(), processes = try ProcessTable.entries()
+        for (project, binding) in [(left, leftBinding), (right, rightBinding)] {
+            let pane = try ownedPane(project, binding, from: all)
+            guard !pane.dead, !binding.stopRequested, agentExists(project, pane: pane, processes: processes) else {
+                throw RouterError.message("Start \(project.name) before opening Split View. No agent was started or replaced.")
+            }
+        }
+        let target = try SplitWorkspace.target(tmux: tmux, controllerSocket: socket, first: left, second: right,
+                                               firstBinding: leftBinding, secondBinding: rightBinding, balance: balance)
+        let checked = try panes()
+        _ = try ownedPane(left, leftBinding, from: checked)
+        _ = try ownedPane(right, rightBinding, from: checked)
+        return target
+    }
+    public func closeSplitView(first: UUID, second: UUID) throws {
+        guard first != second else { throw RouterError.message("Choose the two projects whose split view should close.") }
+        try SplitWorkspace.close(tmux: tmux, first: first, second: second)
+    }
     /// Read-only snapshot of every line tmux still retains, including the current screen.
     /// This is terminal output, not a reconstructed conversation transcript.
     public func captureOutput(_ id: UUID, includeColors: Bool = false) throws -> String {
@@ -261,6 +382,29 @@ public actor LifecycleManager {
         let output = try run(["capture-pane", "-p"] + (includeColors ? ["-e"] : []) + ["-S", "-", "-E", "-", "-t", b.paneID])
         _ = try ownedPane(p, b, from: panes())
         return output // No trimming, character limit, or message extraction.
+    }
+    public func latestReply(_ id: UUID) async throws -> String {
+        let p = try project(id), b = try binding(id)
+        _ = try ownedPane(p, b, from: panes())
+        guard let session = b.nativeSessionID, let path = b.transcriptPath else {
+            throw RouterError.message("No verified transcript is bound yet. Complete an agent turn with AgentRouter running and hooks enabled, then refresh. Terminal screen view remains available.")
+        }
+        let stamp = try LatestReply.stamp(path: path, cli: p.cli)
+        if let cached = replyCache[id], cached.run == b.runID, cached.session == session, cached.stamp == stamp {
+            return cached.text
+        }
+        let text = try await Task.detached {
+            try LatestReply.read(stamp, cli: p.cli, sessionID: session, directory: p.directory)
+        }.value
+        let current = try binding(id)
+        guard current.runID == b.runID, current.nativeSessionID == session, current.transcriptPath == path else {
+            throw RouterError.message("The agent conversation changed while reading. Refresh before copying.")
+        }
+        _ = try ownedPane(try project(id), current, from: panes())
+        if try LatestReply.stamp(path: path, cli: p.cli) == stamp {
+            replyCache[id] = (b.runID, session, stamp, text)
+        }
+        return text
     }
     /// Advisory preflight for the UI's bounded startup wait; paste rechecks everything.
     public func submissionBlocker(_ id: UUID) -> String? {
@@ -349,7 +493,8 @@ extension LifecycleManager {
             guard data.count <= LocalIPC.maximumBytes else { return false }
             let e = try JSONDecoder().decode(HookEnvelope.self, from: data)
             guard e.version == 1, abs(e.timestamp.timeIntervalSinceNow) < 5, !seenEvents.contains(e.id) else { return false }
-            let p = try project(e.projectID), b = try binding(p.id)
+            let p = try project(e.projectID)
+            var b = try binding(p.id)
             guard b.runID == e.runID, b.credential == e.credential, b.paneID == e.paneID, !b.stopRequested else { return false }
             let pane = try ownedPane(p, b, from: panes())
             guard !pane.dead, ProcessTable.descendants(of: b.pid, in: try ProcessTable.entries()).contains(where: { $0.pid == peerPID }) else { return false }
@@ -357,7 +502,20 @@ extension LifecycleManager {
             var activity = live[p.id] ?? AgentActivity(runID: b.runID)
             if let last = activity.lastEventAt, e.timestamp <= last { return false }
             guard let sessionID = e.payload["session_id"]?.string, !sessionID.isEmpty else { return false }
-            if let current = activity.nativeSessionID, current != sessionID { return false }
+            if let current = activity.nativeSessionID ?? b.nativeSessionID, current != sessionID {
+                guard e.payload["hook_event_name"]?.string == "SessionStart" else { return false }
+                activity = AgentActivity(runID: b.runID)
+            }
+            let previousSession = b.nativeSessionID, previousPath = b.transcriptPath
+            if b.nativeSessionID != sessionID { b.nativeSessionID = sessionID; b.transcriptPath = nil }
+            if let path = e.payload["transcript_path"]?.string, path.hasPrefix("/"), path.utf8.count <= 4096 {
+                b.transcriptPath = path
+            }
+            if previousSession != b.nativeSessionID || previousPath != b.transcriptPath {
+                workspace.bindings[p.id.uuidString] = b
+                replyCache[p.id] = nil
+                try persist() // Session metadata only; reply bodies stay in native CLI history/memory.
+            }
             activity.nativeSessionID = sessionID; activity.lastEventAt = e.timestamp
             let interpreted = HookAdapter.interpret(e.payload, cli: p.cli)
             activity.revoke()

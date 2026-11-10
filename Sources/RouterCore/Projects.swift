@@ -34,6 +34,44 @@ public struct NotificationPreferences: Codable, Equatable, Sendable {
     public var unexpectedExit = true
     public init() {}
 }
+public enum CodexApprovalPolicy: String, Codable, CaseIterable, Sendable {
+    case inherit, onRequest = "on-request", never
+    public var title: String {
+        switch self {
+        case .inherit: return "Use existing config"
+        case .onRequest: return "Ask when needed (on-request)"
+        case .never: return "Never ask (never)"
+        }
+    }
+}
+public enum CodexSandboxMode: String, Codable, CaseIterable, Sendable {
+    case inherit, readOnly = "read-only", workspaceWrite = "workspace-write", fullAccess = "danger-full-access"
+    public var title: String {
+        switch self {
+        case .inherit: return "Use existing config"
+        case .readOnly: return "Read only (read-only)"
+        case .workspaceWrite: return "Write in workspace (workspace-write)"
+        case .fullAccess: return "Unrestricted access (danger-full-access)"
+        }
+    }
+}
+public struct CodexSettings: Codable, Equatable, Sendable {
+    public var approvalPolicy: CodexApprovalPolicy = .inherit
+    public var sandboxMode: CodexSandboxMode = .inherit
+    public init() {}
+    public var arguments: [String] {
+        var result: [String] = []
+        if approvalPolicy != .inherit { result += ["-c", "approval_policy=\"\(approvalPolicy.rawValue)\""] }
+        if sandboxMode != .inherit { result += ["-c", "sandbox_mode=\"\(sandboxMode.rawValue)\""] }
+        return result
+    }
+    public var toml: String {
+        var lines: [String] = []
+        if approvalPolicy != .inherit { lines.append("approval_policy = \"\(approvalPolicy.rawValue)\"") }
+        if sandboxMode != .inherit { lines.append("sandbox_mode = \"\(sandboxMode.rawValue)\"") }
+        return lines.joined(separator: "\n")
+    }
+}
 public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
@@ -42,6 +80,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var executable: String
     public var session: String
     public var notifications: NotificationPreferences
+    public var codexSettings: CodexSettings?
     public init(id: UUID = UUID(), name: String = "New project", directory: String = "", cli: CLIKind = .codex, executable: String? = nil, session: String? = nil) {
         self.id = id; self.name = name; self.directory = directory; self.cli = cli
         self.executable = executable ?? cli.detectedPath
@@ -70,6 +109,8 @@ public struct Binding: Codable, Equatable, Sendable {
     public var mode: LaunchMode
     public var configuration: Project
     public var stopRequested = false
+    public var nativeSessionID: String?
+    public var transcriptPath: String?
 }
 public enum LifecycleState: String, Codable, Sendable {
     case stopped, starting, running, stopping, failed, disconnected
@@ -87,12 +128,45 @@ public struct ProjectHealth: Sendable {
         self.paneDead = paneDead
     }
 }
+public struct AgentInstance: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var projectID: UUID
+    public var name: String
+    public var cli: CLIKind
+    public var executable: String
+    public var session: String
+    public init(projectID: UUID, name: String, cli: CLIKind, executable: String) {
+        id = UUID(); self.projectID = projectID; self.name = name; self.cli = cli; self.executable = executable
+        session = "ar-cli-" + id.uuidString.lowercased()
+    }
+}
 public struct Workspace: Codable, Sendable {
-    public var version = 2
+    public var version = 3
     public var projects: [Project]
     public var bindings: [String: Binding] = [:]
     public var history: [HistoryEntry] = []
+    public var instances: [AgentInstance] = []
     public init(projects: [Project]) { self.projects = projects }
+    private enum CodingKeys: String, CodingKey { case version, projects, bindings, history, instances }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        projects = try values.decode([Project].self, forKey: .projects)
+        bindings = try values.decode([String: Binding].self, forKey: .bindings)
+        history = try values.decode([HistoryEntry].self, forKey: .history)
+        instances = try values.decodeIfPresent([AgentInstance].self, forKey: .instances) ?? []
+    }
+    /// Existing project IDs remain the IDs of their original Main controller.
+    public var controllers: [Project] {
+        projects + instances.compactMap { instance in
+            guard let root = projects.first(where: { $0.id == instance.projectID }) else { return nil }
+            var target = Project(id: instance.id, name: root.name + " · " + instance.name, directory: root.directory,
+                                 cli: instance.cli, executable: instance.executable, session: instance.session)
+            target.notifications = root.notifications
+            target.codexSettings = root.codexSettings
+            return target
+        }
+    }
 }
 public struct ProjectStore: Sendable {
     public let url: URL
@@ -100,7 +174,10 @@ public struct ProjectStore: Sendable {
     public func load(defaults: [Project]) throws -> Workspace {
         guard FileManager.default.fileExists(atPath: url.path) else { return Workspace(projects: defaults) }
         let workspace = try JSONDecoder().decode(Workspace.self, from: Data(contentsOf: url))
-        guard workspace.version == 2, Set(workspace.projects.map(\.id)).count == workspace.projects.count else { throw RouterError.message("Invalid settings file; it was not overwritten.") }
+        let ids = workspace.projects.map(\.id) + workspace.instances.map(\.id)
+        guard [2, 3].contains(workspace.version), Set(ids).count == ids.count,
+              workspace.instances.allSatisfy({ instance in workspace.projects.contains { $0.id == instance.projectID } }),
+              Set(workspace.controllers.map(\.session)).count == workspace.controllers.count else { throw RouterError.message("Invalid settings file; it was not overwritten.") }
         return workspace
     }
     public func save(_ workspace: Workspace) throws {

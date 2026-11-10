@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "menuBar": { "label": "AR", "alwaysVisible": true, "separateProjectItem": true },
+  "main": {
+    "order": ["projects", "prompt", "output"],
+    "navigationTabs": false,
+    "destinationDropdown": false,
+    "projectSelection": "click-project-row",
+    "cliSelection": "chips-in-selected-project-row",
+    "bodyFontPt": 16,
+    "supportingFontPt": 15
+  },
+  "projectGear": {
+    "sections": ["agent-controls", "project-configuration", "side-by-side", "notification-preferences"],
+    "actions": ["start", "open-cli", "stop", "restart", "new-cli"],
+    "notes": ""
+  },
+  "prompt": {
+    "title": "Prompt",
+    "primaryAction": "Send & Open CLI",
+    "secondaryAction": "Paste Only",
+    "showSelectedProjectAndCLI": true,
+    "showClipboardPreview": true,
+    "notes": ""
+  },
+  "output": {
+    "title": "CLI output",
+    "actions": ["Copy Output", "Refresh"],
+    "allowViewingAnotherCLI": false,
+    "selection": "follows-selected-project-and-cli",
+    "notes": ""
+  },
+  "header": { "actions": ["history", "app-settings", "hide", "quit"], "notes": "" },
+  "notes": "Edit main.order to rearrange projects, prompt and output. Add placement requests in any notes field. This is a design demo, not a runtime settings file."
+}

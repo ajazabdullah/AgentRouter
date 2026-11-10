@@ -1,112 +1,108 @@
 # AgentRouter
 
-A native macOS menu bar utility for managing local Codex and Claude Code sessions across projects.
+A native macOS menu bar app for managing local Codex and Claude Code sessions across projects.
 
-**Experimental software.** Start agents, switch between their Terminal sessions, route clipboard prompts manually, and copy their output back to your architecture conversation. AgentRouter does not choose a project from your copied text or automatically approve agent requests.
+**Experimental software.** Select a project, route a prompt manually, and watch its exact CLI in Terminal. Clipboard capture never chooses a project, submits automatically, or approves permissions. See [CHANGELOG.md](CHANGELOG.md) for important updates and [verification](docs/VERIFICATION.md) for evidence and limits.
 
 ## Features
 
-- Add projects with a working directory, CLI executable, session name, and notification preferences.
-- Start, stop with confirmation, and restart agents in exact, owned tmux panes.
-- Open the selected agent in Terminal.app; reuse an attached tab when available.
-- Keep **AR** in the menu bar, with one additional button for the selected running project.
-- Automatically capture text copied while ChatGPT Desktop or Claude Desktop is active.
-- **Send Clipboard & Open Terminal** reads the current clipboard, submits only when readiness is verified, and opens the selected session.
-- **Paste Only** provides a manual fallback without pressing Enter.
-- View retained terminal output and use **Copy Output** to copy plain text.
-- Receive native notifications and inspect project event history.
-- Hide the widget while monitoring continues; reopen it from AR or **Option–Command–R**.
+- A single main view with project rows, CLI selection chips, prompt routing, and output copying. Body/output text uses 16 pt; supporting text uses 15 pt.
+- Multiple independent Codex or Claude Code CLI instances per project, with separate tmux sessions, exact pane identities, hook metadata, and live status.
+- A gear beside each project for Start, Open CLI, Stop, Restart, New CLI, configuration, notification preferences, and side-by-side views.
+- Persistent AR menu access, one additional selected-running-project item, remembered CLI selection and optional keyboard shortcuts.
+- Automatic clipboard capture from the supported desktop apps; manual **Send & Open CLI** and **Paste Only** actions.
+- Complete latest-reply copying from verified native transcripts, plus a separate retained terminal-screen viewer.
+- Native lifecycle notifications, timestamped history and interactive replies where readiness permits. Notification clicks open the exact CLI in Terminal, with UI fallback for errors or busy operations.
+- Resizable side-by-side Terminal views while retaining separate CLI windows.
+- Safe quit review, local Markdown checkpoint export, confirmed graceful shutdown and separately confirmed force-stop retries.
 
 ## Requirements
 
-- macOS 14 or later and a Swift 6 toolchain, such as Xcode's command-line tools.
-- tmux. The development environment uses tmux 3.8.
+- macOS 14 or later and Swift 6/Xcode command-line tools.
+- tmux; development used version 3.8.
 - Codex CLI and/or Claude Code installed and authenticated separately.
-- A working Node runtime for npm-installed CLI launchers. AgentRouter checks Homebrew Node runtimes because an executable symlink can still have broken library dependencies.
+- A working Node runtime for npm-based CLI launchers.
 
-No third-party Swift packages are required. Current runtime discovery favors Homebrew installations; other layouts may require configuring an absolute CLI executable path. Intel Macs have not received the same runtime testing as Apple Silicon.
+There are no third-party Swift packages. Runtime discovery favors Homebrew paths; other installations may require an absolute executable path. Intel Macs have not received the same runtime checks as Apple Silicon.
 
 ## Build and install
 
-Clone this repository and run:
-
 ```sh
-cd AgentRouter
 ./scripts/build-app.sh
 open .build/AgentRouter.app
 ```
 
-The script creates an ad-hoc signed app bundle. No notarized download is provided. To install locally, quit any running AgentRouter app first, then copy the bundle:
+The script creates an ad-hoc signed bundle. No notarized binary download is provided. To install, quit AgentRouter using **Keep Running & Quit** if you want to preserve live CLIs, then copy the bundle:
 
 ```sh
 ditto .build/AgentRouter.app /Applications/AgentRouter.app
 open /Applications/AgentRouter.app
 ```
 
-You can also open `Package.swift` in Xcode. To sign with your own existing identity, set `AGENTROUTER_SIGN_IDENTITY` when invoking the build script. The script does not create certificates or alter macOS security settings.
+You can open `Package.swift` in Xcode. Set `AGENTROUTER_SIGN_IDENTITY` to use your own existing signing identity; the script does not create certificates or change security settings.
 
-## Set up a project
+## Set up and select projects
 
-1. Open AgentRouter. Its widget appears on launch.
-2. Select an example project and click **Settings**, or use **+** to add one.
-3. Choose a name, an existing absolute working directory, Codex or Claude Code, an absolute CLI executable, and a unique tmux session identifier. Save.
-4. Click **Start Agent**. The app creates and binds the pane, checks startup health, and opens Terminal. Complete CLI authentication, workspace trust, and hook review there if required.
-5. Use **Stop** or **Restart** in Project management. Shutdown requires confirmation and never escalates to a force stop automatically. Choose a fresh conversation or the CLI's conversation resume picker before starting/restarting.
+1. Open AgentRouter and click **Add**. Its generic initial examples are Project 1, Project 2 and Project 3; existing saved settings keep their names and IDs.
+2. Set a project name, existing absolute working directory, Codex or Claude Code, an installed absolute executable path, and a unique tmux session name. Save.
+3. Use the gear beside the project, then **Start Agent**. Complete login, directory trust and hook review in **Open CLI** if required.
+4. Click a project row and a CLI chip to select/open its existing session. Selection never starts a stopped agent automatically. The prompt area identifies the selected destination.
+5. Use the project's gear for lifecycle controls, **Edit Configuration…**, **New CLI**, or **Work side by side**. The gear opens controls without opening Terminal by itself.
 
-The default example names are **Project 1**, **Project 2**, and **Project 3**. Existing installations retain their saved project names and settings.
+Additional CLIs share the same checkout. They are separate conversations, not isolated worktrees, and can edit the same files. Directory changes/removing a project require all of its CLIs to be stopped. Creating an additional instance upgrades settings to version 3; older app versions cannot read that format.
 
-## Send a prompt
+## Send prompts and receive output
 
-1. Copy a prompt in your desktop conversation.
-2. Open AgentRouter and select the destination. Its name, directory, CLI, and session are displayed before sending.
-3. Click **Send Clipboard & Open Terminal**.
+Copy a prompt, select a project/CLI, and click **Send & Open CLI**. It snapshots the latest clipboard, submits only when readiness is verified, and opens the exact Terminal session. A stopped CLI offers **Start & Send**, with a bounded readiness wait. No delayed background send remains queued after failure.
 
-If the selected agent is stopped, the app offers **Start & Send**, then waits briefly for verified readiness. If readiness is uncertain, it refuses submission and offers **Open Terminal**. No background send remains queued after the startup wait expires.
+**Current limitation:** Codex hooks do not establish safe Enter readiness in this implementation. Use **Manual paste & submit → Paste Only** after confirming the displayed CLI is idle, then submit manually in Terminal. Claude's native `idle_prompt` may grant a short, single-use readiness lease. Structured questions and approvals must be handled in the CLI; AgentRouter never automatically approves them.
 
-**Current limitation:** Codex's implemented hook adapter does not establish safe Enter readiness, so automatic submission stays blocked for Codex. Use **Paste Only** after confirming the displayed destination is idle, then submit manually in Terminal. Claude's native `idle_prompt` may grant a short, single-use readiness window; authentication, trust prompts, questions, and approvals can still prevent submission.
+The output follows the selected project/CLI. **Latest reply → Copy Output** reads the complete latest completed assistant text from the verified native session transcript, without trimming or a length cap. A missing or mismatched transcript is an error, never a guessed conversation. Existing running sessions need a fresh authenticated hook event to bind their transcript metadata.
 
-## Receive output and notifications
+**Terminal screen → Copy Screen** instead copies retained tmux output, preserving colors in the viewer. Full-screen redraws/history limits can hide earlier terminal text. Output copying never sends content to a desktop app; paste it yourself.
 
-The output project's dropdown can follow the selected destination or show another configured project. **Copy Output** copies the displayed plain text without a length cap or trimming. Paste it into your desktop conversation yourself; AgentRouter never sends output to ChatGPT Desktop or Claude Desktop.
+## Notifications, settings and shortcuts
 
-The viewer is a tmux snapshot, not a full terminal emulator or conversation archive. It supports colors, bold, and italics, but tmux history limits and full-screen redraws can remove earlier output. Some terminal features, including OSC hyperlink sequences, remain incomplete.
+Enable project events under its gear → **Edit Configuration…**, save, and use **Allow macOS Notifications…** for system permission. **Test Notification** checks permission/request delivery without attaching hooks. Hook settings are scoped to AgentRouter launches and do not overwrite native CLI configuration. Native authentication and hook trust still apply.
 
-Manage notifications in **Project Settings**. Enable project events and save; use **Allow macOS Notifications…** for system permission, and **Test Notification** for a delivery check. Clicking a notification selects its project and reveals the widget. Hooks are supplied when AgentRouter launches a CLI; enabling notifications does not retrofit hooks into an unrelated running agent.
+Clicking a notification opens the corresponding CLI in Terminal, reusing an attached tab where possible. If that cannot proceed, AgentRouter displays the problem. Notification clicks do not start a CLI or send input. History stores metadata rather than prompt/reply bodies.
 
-A finished turn is labelled separately from successful task completion. Some questions and blockers are inferred and labelled accordingly. Structured dialogs and permission requests must be handled in Terminal; AgentRouter does not approve them. See the [support matrix](docs/VERIFICATION.md) for the distinction between implemented mappings and verified live behavior.
+The header opens history and application settings; Back returns to the project list. **Show widget automatically when copying** defaults OFF; **Hide widget after sending** defaults ON. Hide/title-bar close leave monitoring and agents running. Reopen through AR or **Option–Command–R**. macOS may hide menu-bar items when crowded.
 
-## Window and keyboard behavior
+Optional **Option–Command–1–9** shortcuts select projects while the widget is active. Global F7/F8/F9 are assigned to the first three project IDs on initial setup and remember those IDs; hold Fn if your keyboard uses media keys. Missing assignments never choose a fallback project.
 
-**Hide** and the title-bar close button hide only the widget. Quitting AgentRouter also leaves tmux agents running. Reopening the app revalidates their bindings.
+Codex approval (`on-request`, `never`) and sandbox (`read-only`, `workspace-write`, `danger-full-access`) choices are launch-only overrides set in project configuration. They apply on the next Start/Restart. `never` does not grant access beyond the selected sandbox; login/trust prompts can still require interaction.
 
-Under **Window behavior**, automatic widget opening on copy defaults OFF, and hiding after a successful send defaults ON. The last selected project is remembered.
+## Quitting and checkpoints
 
-Optional global **F7/F8/F9** shortcuts open the first three mapped projects. If those keys control media, hold Fn or configure standard function keys in macOS Keyboard settings. AgentRouter does not change those system settings. **Option–Command–R** reveals the widget; optional **Option–Command–1…9** project shortcuts work while the widget receives keyboard input.
+- **Cancel** is the quit review's default.
+- **Export Checkpoint…** saves a private Markdown file with all configured CLIs, sampled identities/status and available verified completed replies; it returns to review. This is a checkpoint, not an agent-written handoff or proof work was saved.
+- **Keep Running & Quit** stops only AgentRouter. CLI sessions continue; AgentRouter monitoring and notifications stop until reopening.
+- **Stop Agents & Quit…** separately confirms graceful SIGTERM to verified owned CLI groups and waits for verified exit. If it fails, the app stays open.
+- **Force Stop Remaining…** requires another confirmation and only targets remaining originally confirmed runs. A restarted/unverified run cannot inherit consent. Terminal windows are not closed.
 
-## Local storage and safety
+Drafts are not persisted or included in checkpoints. Exported replies can themselves contain sensitive material; review before sharing. Logout/shutdown/force quit can affect session survival independently of AgentRouter.
 
-AgentRouter uses a private tmux server, `agentrouter-managed-v2`, and targets exact session, pane, process, and run identities. Missing, stale, ambiguous, and unrelated targets are refused. It never executes clipboard contents as shell commands. Clipboard text is passed through a temporary named tmux buffer, and Enter requires an explicit action plus verified readiness.
+## Privacy and safety
 
-Settings, bindings, and bounded event metadata live in `~/Library/Application Support/AgentRouter/`. Clipboard previews, replies, and output snapshots stay in memory. The downstream CLIs and tmux retain their normal history and persistence behavior. AgentRouter makes no routing/IPC network requests; the CLIs use their normal network connections. Clipboard-source attribution is a frontmost-application heuristic.
+AgentRouter uses exact tmux ownership/run/pane/process identities, never an active Terminal window or guessed pane. Unowned collisions, stale/ambiguous targets and uncertain readiness fail closed. Clipboard bytes enter tmux through a named buffer, never a shell command; no prompt is submitted automatically.
 
-Hooks use an owner-only Unix socket and per-run credentials, not a network port. This is a same-user/controller-process-tree trust boundary, not isolation from malicious software running as the same macOS user. Existing CLI configuration files are not overwritten; native hook-trust policies still apply.
+Local settings/binding metadata/history live under `~/Library/Application Support/AgentRouter/` with owner-only permissions. Hook IPC uses a local Unix socket. The router opens no network listener; native CLIs retain their own network and history behavior. No conversation-to-project detection, automatic routing, queues or automatic security approvals are implemented.
 
-## Development and known limitations
+## Validation and contributions
+
+The current update compiled successfully. New multi-CLI, quit/shutdown and merged-UI behavior has received static reviews and compilation checks, **not full runtime or automated-test verification**. See [architecture](docs/ARCHITECTURE.md), [verification](docs/VERIFICATION.md) and [review](docs/REVIEW-2026-11-07.md). An optional local design simulation and editable placement JSON are in `docs/ui-demo/`; they do not control real sessions.
+
+For contributors who want to run the existing tests themselves:
 
 ```sh
 swift test
-# Opt-in installed CLI lifecycle test: no model prompts are submitted.
+# Opt-in native CLI startup smoke checks; no submitted tasks:
 AGENTROUTER_NATIVE_TESTS=1 swift test --filter NativeCLITests
-# Reproduce Finder-like startup conditions using only the installed Codex CLI:
-/usr/bin/env PATH=/usr/bin:/bin LC_ALL=C LANG=C \
-  AGENTROUTER_NATIVE_TESTS=1 AGENTROUTER_NATIVE_CLI=codex \
-  /usr/bin/swift test --filter NativeCLITests
 ```
 
-Tests use disposable projects and isolated tmux servers. Native CLI checks may display trust or authentication prompts; they do not accept them automatically.
+## Stay updated
 
-See [architecture](docs/ARCHITECTURE.md), [verification and notification support](docs/VERIFICATION.md), and the [code review with unresolved findings](docs/REVIEW-2026-11-07.md). Known issues include partial-start cleanup, hook tracking when a conversation changes within an existing CLI process, repeated exit notifications after app relaunch, and malformed unrelated pane metadata. Treat this as an experimental source release, not a hardened agent supervisor.
+Choose **Watch → Custom → Releases** on GitHub to subscribe to published release announcements. Cloning or starring alone is not a release subscription. Important changes are recorded in [CHANGELOG.md](CHANGELOG.md). A local source checkout can be updated with `git pull --ff-only`, then rebuilt using the commands above. AgentRouter has no automatic update checker.
 
-## License
-
-[MIT](LICENSE). Contributions and focused bug reports are welcome. Do not include prompts, credentials, local settings, or private project data in public reports.
+Use GitHub Issues for reproducible bugs and feature requests. Remove tokens, private prompts and personal project paths before sharing logs. MIT licensed; see [LICENSE](LICENSE).

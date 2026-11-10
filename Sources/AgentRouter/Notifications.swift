@@ -34,7 +34,7 @@ final class NotificationBridge: NSObject, UNUserNotificationCenterDelegate {
         try await post(entry)
         try await Task.sleep(for: .seconds(1))
         let delivered = await center.deliveredNotifications().contains { $0.request.identifier == entry.id.uuidString }
-        return "Authorization: \(state). Test request \(entry.id.uuidString) accepted without errors. In delivered list: \(delivered ? "yes" : "not yet"). Click the notification to select \(project.name)."
+        return "Authorization: \(state). Test request \(entry.id.uuidString) accepted without errors. In delivered list: \(delivered ? "yes" : "not yet"). Click the notification to open the CLI for \(project.name)."
     }
     func post(_ entry: HistoryEntry) async throws {
         let center = UNUserNotificationCenter.current()
@@ -44,7 +44,7 @@ final class NotificationBridge: NSObject, UNUserNotificationCenterDelegate {
         }
         let content = UNMutableNotificationContent()
         content.title = entry.projectName + " · " + entry.kind.rawValue
-        content.body = "Open AgentRouter to review this event. " + entry.evidence
+        content.body = "Click to open this project's CLI in Terminal. " + entry.evidence
         content.sound = .default
         content.userInfo = ["projectID": entry.projectID.uuidString]
         try await center.add(UNNotificationRequest(identifier: entry.id.uuidString, content: content, trigger: nil))
