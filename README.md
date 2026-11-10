@@ -1,8 +1,12 @@
 # AgentRouter
 
-A native macOS menu bar app for managing local Codex and Claude Code sessions across projects.
+AgentRouter keeps your Codex and Claude Code projects one click away in the Mac menu bar.
 
-**Experimental software.** Select a project, route a prompt manually, and watch its exact CLI in Terminal. Clipboard capture never chooses a project, submits automatically, or approves permissions. See [CHANGELOG.md](CHANGELOG.md) for important updates and [verification](docs/VERIFICATION.md) for evidence and limits.
+Copy a prompt from ChatGPT or Claude, choose the project you want to work on, and send it to your coding assistant. Open its Terminal window to follow the work, then copy the assistant’s reply back into your chat when you’re ready.
+
+Keep several projects open, switch between their assistants, and get notified when they need your attention. You choose where each prompt goes and when it is sent.
+
+See the [changelog](CHANGELOG.md) for what’s new and [verification notes](docs/VERIFICATION.md) for what has been checked and what still needs manual testing.
 
 ## Features
 
