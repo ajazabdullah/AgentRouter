@@ -10,7 +10,7 @@ See the [changelog](CHANGELOG.md) for what’s new and [verification notes](docs
 
 ## Features
 
-- A single main view with project rows, CLI selection chips, prompt routing, and output copying. Body/output text uses 16 pt; supporting text uses 15 pt.
+- A single main view with project rows, CLI selection chips, prompt routing, and output copying.
 - Multiple independent Codex or Claude Code CLI instances per project, with separate tmux sessions, exact pane identities, hook metadata, and live status.
 - A gear beside each project for Start, Open CLI, Stop, Restart, New CLI, configuration, notification preferences, and side-by-side views.
 - Persistent AR menu access, one additional selected-running-project item, remembered CLI selection and optional keyboard shortcuts.
