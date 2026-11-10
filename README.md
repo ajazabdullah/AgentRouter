@@ -61,6 +61,25 @@ The output follows the selected project/CLI. **Latest reply → Copy Output** re
 
 **Terminal screen → Copy Screen** instead copies retained tmux output, preserving colors in the viewer. Full-screen redraws/history limits can hide earlier terminal text. Output copying never sends content to a desktop app; paste it yourself.
 
+## Agent notification behavior
+
+AgentRouter must be running for hook monitoring and native notifications; it can
+be hidden. Enable and save each project's event preferences and allow macOS
+notifications. Quitting AgentRouter stops its monitoring/notifications even if the
+underlying CLI sessions remain alive.
+
+Clicking an agent notification opens its exact CLI in Terminal, reusing an attached
+tab when available. If the target is unavailable, Terminal cannot open, or the app
+is busy, AgentRouter shows the problem. Clicking does not start a stopped CLI,
+submit text, approve permissions or route to another project. There is currently
+no setting to change the notification-click behavior.
+
+A finished turn is not proof the task succeeded. Native events, inferred questions
+and unsupported completion/blocker cases are distinguished in the
+[notification support matrix](docs/VERIFICATION.md). Questions can be answered in
+the widget only under its readiness checks; structured dialogs and approvals need
+manual CLI interaction.
+
 ## Notifications, settings and shortcuts
 
 Enable project events under its gear → **Edit Configuration…**, save, and use **Allow macOS Notifications…** for system permission. **Test Notification** checks permission/request delivery without attaching hooks. Hook settings are scoped to AgentRouter launches and do not overwrite native CLI configuration. Native authentication and hook trust still apply.
@@ -103,6 +122,6 @@ AGENTROUTER_NATIVE_TESTS=1 swift test --filter NativeCLITests
 
 ## Stay updated
 
-Choose **Watch → Custom → Releases** on GitHub to subscribe to published release announcements. Cloning or starring alone is not a release subscription. Important changes are recorded in [CHANGELOG.md](CHANGELOG.md). A local source checkout can be updated with `git pull --ff-only`, then rebuilt using the commands above. AgentRouter has no automatic update checker.
+Choose **Watch → Custom → Releases** on GitHub to subscribe to published release announcements. Cloning or starring alone is not a release subscription. A code push does not create a release announcement; a GitHub Release must actually be published for release subscribers. Important changes are recorded in [CHANGELOG.md](CHANGELOG.md). A local source checkout can be updated with `git pull --ff-only`, then rebuilt using the commands above. AgentRouter has no automatic update checker.
 
 Use GitHub Issues for reproducible bugs and feature requests. Remove tokens, private prompts and personal project paths before sharing logs. MIT licensed; see [LICENSE](LICENSE).

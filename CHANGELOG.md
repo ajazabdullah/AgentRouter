@@ -11,6 +11,9 @@
 
 ### Changed
 
+- README explains agent notification clicks, permission/running requirements,
+  and the separate GitHub release-subscription workflow for software updates.
+
 - One main view combines selectable project rows, CLI chips, prompt routing and output. Each project's gear opens lifecycle controls, configuration and side-by-side settings. History and application preferences open from the header.
 - **Send & Open CLI** reads the latest clipboard and submits only when readiness is verified. Manual Paste Only and existing reply controls remain available.
 - Body/output text uses 16 pt, supporting text 15 pt, with larger headings and controls. Counts distinguish running CLIs from configured CLIs.
