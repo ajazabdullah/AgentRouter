@@ -7,18 +7,42 @@ struct RouterWidget: View {
     @State private var confirmation: Action?
     @State private var showAppSettings = false
     @State private var managingProjectID: UUID?
+    @State private var expandedProjectID: UUID?
     enum Action: String, Identifiable { case stop, restart, force, remove, startAndSend; var id: String { rawValue } }
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if model.showHistory { historyPage }
-                    else if showAppSettings { settingsPage }
-                    else if managingProjectID != nil { projectsPage }
-                    else { workspace }
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            if model.showHistory || showAppSettings || managingProjectID != nil {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if model.showHistory { historyPage }
+                        else if showAppSettings { settingsPage }
+                        else { projectsPage }
+                    }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                HSplitView {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Projects").font(.system(size: 20, weight: .semibold))
+                                Spacer()
+                                Button { model.editing = Project() } label: { Image(systemName: "plus") }
+                                    .disabled(model.busy || model.fatal).accessibilityLabel("Add project")
+                            }
+                            projectRows
+                        }.padding(16)
+                    }.frame(minWidth: 260, idealWidth: 330, maxWidth: 450)
+                    VSplitView {
+                        VStack(spacing: 0) {
+                            ScrollView { VStack(alignment: .leading, spacing: 16) { workspace }.padding(16) }
+                                .frame(minHeight: 100)
+                            sendBar
+                        }.frame(minHeight: 300)
+                        outputCard.padding(12).frame(minHeight: 180)
+                    }.frame(minWidth: 570, maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             Divider()
             HStack(spacing: 8) {
@@ -32,7 +56,7 @@ struct RouterWidget: View {
         .font(.system(size: 16))
         .controlSize(.large)
         .background(Color(nsColor: .windowBackgroundColor))
-        .frame(width: 640)
+        .frame(minWidth: 900, minHeight: 620)
         .disabled(model.quitReviewActive)
         .onChange(of: model.startOffer?.id) { _, id in
             if id != nil { confirmation = .startAndSend }
@@ -41,6 +65,7 @@ struct RouterWidget: View {
         .onChange(of: model.outputView) { _, _ in Task { await model.refreshOutput() } }
         .onChange(of: model.selectedID) { _, _ in
             model.outputProjectID = nil
+            expandedProjectID = model.currentProject?.id
             if let managingProjectID, model.currentProject?.id != managingProjectID { self.managingProjectID = nil }
             Task { await model.refreshOutput() }
         }
@@ -56,7 +81,7 @@ struct RouterWidget: View {
             case .remove: message = model.isAdditionalCLI ? "Remove only \(project)? Its agent must be stopped first. Other CLIs and project settings remain." : "Remove \(project) and all of its configured CLIs? All agents in this project must be stopped first. Repository files remain unchanged."
             case .startAndSend:
                 let offer = model.startOffer
-                message = "Start \(offer?.projectName ?? project) with \(offer?.mode.title.lowercased() ?? "the selected launch mode") and send the clipboard prompt captured when you clicked? Submission occurs only if readiness is verified within 10 seconds. Otherwise, nothing is sent and Open Terminal is offered."
+                message = "Start \(offer?.projectName ?? project) with \(offer?.mode.title.lowercased() ?? "the selected launch mode") and send the preview captured when you clicked? Submission occurs only if readiness is verified within 10 seconds. Otherwise, nothing is sent and Open Terminal is offered."
             }
             let performAction: () -> Void = {
                 Task {
@@ -84,14 +109,12 @@ struct RouterWidget: View {
                     model.showHistory = false; showAppSettings = false; managingProjectID = nil
                 } label: { Image(systemName: "chevron.left") }.accessibilityLabel("Back to projects")
             }
-            Image(systemName: "arrow.triangle.branch").font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.tint).frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 3) {
-                Text("AgentRouter").font(.system(size: 24, weight: .bold))
-                Text("Your projects. Your agents.").font(.system(size: 15)).foregroundStyle(.secondary)
-            }
+            Image(systemName: "arrow.triangle.branch").font(.system(size: 18, weight: .semibold)).foregroundStyle(.tint)
+            Text("AgentRouter").font(.system(size: 20, weight: .semibold))
+            Text("Your projects. Your agents.").font(.system(size: 15)).foregroundStyle(.secondary)
             Spacer()
+            Button { model.onToggleFullScreen?() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                .accessibilityLabel("Toggle full screen")
             Button { model.showHistory = true; showAppSettings = false; managingProjectID = nil } label: { Image(systemName: "bell") }
                 .accessibilityLabel("Notification history")
             Button { model.showHistory = false; showAppSettings = true; managingProjectID = nil } label: { Image(systemName: "slider.horizontal.3") }
@@ -108,12 +131,18 @@ struct RouterWidget: View {
                 .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("App actions")
             Button { model.hideWidget() } label: { Image(systemName: "minus") }
                 .help("Hide AgentRouter; agents keep running").accessibilityLabel("Hide AgentRouter")
-        }.padding(20)
+        }.controlSize(.regular).padding(.horizontal, 16).padding(.vertical, 8)
     }
 
-    private func card<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+    private func card<Content: View>(_ title: String, icon: String, clearAction: (() -> Void)? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: icon).font(.system(size: 17, weight: .semibold))
+            HStack {
+                Label(title, systemImage: icon).font(.system(size: 17, weight: .semibold))
+                Spacer()
+                if let clearAction {
+                    Button("Clear", action: clearAction).disabled(model.busy || model.text.isEmpty)
+                }
+            }
             content()
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
@@ -122,16 +151,6 @@ struct RouterWidget: View {
 
     private var workspace: some View {
         Group {
-            card("Projects", icon: "folder") {
-                HStack {
-                    Text("Select a project to work with its CLI.").foregroundStyle(.secondary)
-                    Spacer()
-                    Button { model.editing = Project() } label: { Label("Add", systemImage: "plus") }
-                        .disabled(model.busy || model.fatal)
-                }
-                projectRows
-                statusMessage
-            }
             if let activity = model.activity, activity.question != nil || [.approvalRequired, .blocked, .needsInput].contains(activity.kind) {
                 card("Agent activity", icon: "waveform.path") {
                     Text(activity.kind.rawValue.replacingOccurrences(of: "_", with: " ")).font(.system(size: 16, weight: .semibold))
@@ -151,64 +170,74 @@ struct RouterWidget: View {
                     }.font(.system(size: 15)).foregroundStyle(.secondary)
                 }
             }
-            card("Prompt preview & manual routing", icon: "doc.on.clipboard") {
+            card("Prompt preview & manual routing", icon: "doc.on.clipboard", clearAction: { model.text = "" }) {
                 if let project = model.current {
                     Text(project.name + " → " + model.cliTitle(project.id)).fontWeight(.semibold).foregroundStyle(.tint)
                 }
                 Text(model.source).font(.system(size: 15)).foregroundStyle(.secondary)
-                TextEditor(text: $model.text).font(.system(size: 16, design: .monospaced)).frame(height: 120).border(.quaternary)
-                HStack {
-                    Text("\(model.text.utf8.count) / 65,536 bytes").font(.system(size: 15)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Clear") { model.text = "" }
-                }
-                Button { Task { await model.sendAndOpenCLI() } } label: {
-                    Label("Send & Open CLI", systemImage: "paperplane.fill").frame(maxWidth: .infinity)
-                }.buttonStyle(.borderedProminent).disabled(model.busy || model.fatal || model.current == nil)
-                Text("Reads the latest clipboard. Submits only to the selected CLI when readiness is verified.").font(.system(size: 15)).foregroundStyle(.secondary)
-                Button("Open CLI") { Task { await model.open() } }.disabled(model.busy || model.currentHealth?.paneID == nil)
-                if let fallback = model.fallbackProject {
-                    Button("Open \(fallback.name) for manual interaction") { Task { await model.openProject(fallback.id) } }.disabled(model.busy)
-                }
-                DisclosureGroup("Manual paste & submit") {
-                Toggle("I checked the destination and its input is ready", isOn: $model.ready).disabled(model.busy)
-                HStack {
-                    Button("Paste Only") { Task { await model.send(submit: false) } }.disabled(!model.canPaste || model.text.isEmpty)
-                    Button("Send & Submit") { Task { await model.send(submit: true) } }.disabled(!model.canSubmit || model.text.isEmpty)
-                }
-                Text("Submit requires a fresh verified idle signal. Approvals stay in the CLI.").font(.system(size: 15)).foregroundStyle(.secondary)
-                }
+                TextEditor(text: $model.text).font(.system(size: 16, design: .monospaced)).frame(height: 160).border(.quaternary)
+                Text("\(model.text.utf8.count) / 65,536 bytes").font(.system(size: 15)).foregroundStyle(.secondary)
             }
-            outputCard
         }
     }
 
-    private var statusMessage: some View {
+    @ViewBuilder private var statusMessage: some View {
+        if let notice = model.channelDeliveryNotice { Text(notice).font(.caption).foregroundStyle(.orange) }
         Text(model.status).font(.system(size: 15)).foregroundStyle(model.fatal ? .red : .secondary)
             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
     }
 
-    private var outputCard: some View {
-        card("CLI output", icon: "text.alignleft") {
-            HStack {
-                Button { Task { await model.refreshOutput() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(model.busy)
+    private var sendBar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            if let project = model.current {
+                Text("To: " + project.name + " · " + model.cliTitle(project.id)).fontWeight(.semibold).lineLimit(2)
+            } else { Text("Select a project to send a prompt.").foregroundStyle(.secondary) }
+            HStack(spacing: 12) {
+                Button { Task { await model.sendAndOpenCLI() } } label: {
+                    Label("Send & Open CLI", systemImage: "paperplane.fill")
+                }.buttonStyle(.borderedProminent).disabled(model.busy || model.fatal || model.current == nil || model.text.isEmpty)
+                Menu("Send preview") {
+                    Toggle("Destination checked; CLI input is ready", isOn: $model.ready)
+                    Button("Paste Only") { Task { await model.send(submit: false) } }.disabled(!model.canPaste || model.text.isEmpty)
+                    Button("Send & Submit") { Task { await model.send(submit: true) } }.disabled(!model.canSubmit || model.text.isEmpty)
+                }.disabled(model.busy || model.fatal).help("Paste the visible preview without Enter, or submit when readiness is verified.")
+                Button("Open CLI") { Task { await model.open() } }.disabled(model.busy || model.currentHealth?.paneID == nil)
                 Spacer()
-                Button { Task { await model.copyOutput() } } label: {
-                    Label(model.outputView == .latestReply ? "Copy Output" : "Copy Screen", systemImage: "doc.on.doc")
-                }.buttonStyle(.borderedProminent).disabled(model.busy || !model.hasDisplayedOutput)
+                if model.busy { ProgressView().controlSize(.small) }
             }
-            Picker("View", selection: $model.outputView) {
-                ForEach(RouterModel.OutputView.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented)
+            if let notice = model.channelDeliveryNotice { Text(notice).font(.caption).foregroundStyle(.orange) }
+            Text(model.status).font(.system(size: 15)).foregroundStyle(model.fatal ? .red : .secondary)
+                .lineLimit(2).textSelection(.enabled).help(model.status)
+        }.padding(.horizontal, 20).padding(.bottom, 14)
+            .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var outputCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("CLI output").font(.system(size: 18, weight: .semibold))
+                Menu(model.outputView.rawValue) {
+                    ForEach(RouterModel.OutputView.allCases, id: \.self) { view in
+                        Button(view.rawValue) { model.outputView = view }
+                    }
+                }.fixedSize()
+                Spacer()
+                Button { Task { await model.refreshOutput() } } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(model.busy).accessibilityLabel("Refresh output")
+                Button(model.outputView == .latestReply ? "Copy Output" : "Copy Screen") { Task { await model.copyOutput() } }
+                    .buttonStyle(.borderedProminent).disabled(model.busy || !model.hasDisplayedOutput)
+            }
             ScrollView([.vertical, .horizontal]) {
                 Text(model.styledOutput).font(.system(size: 16, design: .monospaced))
                     .textSelection(.enabled).fixedSize(horizontal: true, vertical: true)
                     .padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
-            }.frame(height: 230).background(Color.black, in: RoundedRectangle(cornerRadius: 10))
-            if !model.outputError.isEmpty { Text(model.outputError).font(.system(size: 15)).foregroundStyle(.secondary) }
-            Text(model.outputView == .latestReply ? "Complete latest recorded reply. Copy preserves the text exactly." : "Retained terminal screen; use Latest reply for complete reply copying.")
-                .font(.system(size: 15)).foregroundStyle(.secondary)
-        }
+            }.frame(minHeight: 80, maxHeight: .infinity).background(Color.black, in: RoundedRectangle(cornerRadius: 10))
+            if !model.outputError.isEmpty {
+                Text(model.outputError).font(.system(size: 15)).foregroundStyle(.secondary).lineLimit(2).help(model.outputError)
+            }
+        }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var projectsPage: some View {
@@ -296,6 +325,10 @@ struct RouterWidget: View {
             card("Window behavior", icon: "macwindow") {
                 Toggle("Show widget automatically when copying", isOn: $model.showWidgetOnCopy)
                 Toggle("Hide widget after sending", isOn: $model.hideWidgetAfterSending)
+                Toggle("Expand CLI to fill screen after sending", isOn: $model.fillCLIScreenAfterSending)
+                Text("Resizes only the verified Terminal window to this display’s usable area; it does not create a separate full-screen Space.").font(.system(size: 15)).foregroundStyle(.secondary)
+                Toggle("Show floating AR circle over Terminal", isOn: $model.showFloatingCircle)
+                Text("Drag the circle to move it; click to show or hide AgentRouter. Its position is remembered.").font(.system(size: 15)).foregroundStyle(.secondary)
                 Text("When hidden, monitoring stays active. A temporary dot beside AR indicates a captured clipboard.").foregroundStyle(.secondary)
             }
             card("Keyboard shortcuts", icon: "keyboard") {
@@ -313,7 +346,7 @@ struct RouterWidget: View {
                 HStack {
                     Picker("CLI", selection: Binding<UUID?>(
                         get: { model.selectedID },
-                        set: { id in if let id { Task { await model.selectCLIAndOpen(id) } } }
+                        set: { id in if let id { _ = model.selectCLI(id) } }
                     )) {
                         ForEach(model.controllers(in: root.id)) { target in
                             Text(model.cliTitle(target.id) + " · " + (model.health[target.id]?.state.rawValue ?? "checking")).tag(Optional(target.id))
@@ -329,47 +362,55 @@ struct RouterWidget: View {
             }
     }
     private var projectRows: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 10) {
             ForEach(Array(model.projectGroups.enumerated()), id: \.element.id) { index, project in
                 VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                Button { Task { await model.selectProjectAndOpenCLI(project.id) } } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "folder.fill").foregroundStyle(color(index)).frame(width: 32, height: 36)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(project.name).font(.system(size: 17, weight: .semibold)).lineLimit(1)
-                            Text(projectSummary(project.id)).font(.system(size: 15)).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button {
+                            expandedProjectID = project.id
+                            _ = model.selectProject(project.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 6) {
+                                    Circle().fill(color(index)).frame(width: 8, height: 8)
+                                    Text(project.name).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                                    if model.currentProject?.id == project.id {
+                                        Image(systemName: "checkmark.circle.fill").foregroundStyle(color(index))
+                                    }
+                                }
+                                Text(projectSummary(project.id)).font(.system(size: 15)).foregroundStyle(.secondary)
+                                Text(model.projectState(project.id)?.rawValue.capitalized ?? "Checking")
+                                    .font(.system(size: 15)).foregroundStyle(stateColor(model.projectState(project.id)))
+                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }.buttonStyle(.plain).help(project.name)
+                            .accessibilityLabel("Select " + project.name)
+                        Button("Go to CLI") { Task { await model.selectProjectAndOpenCLI(project.id) } }
+                            .controlSize(.regular).font(.system(size: 15))
+                            .help("Open this project's remembered CLI in Terminal")
+                            .accessibilityLabel("Go to CLI for " + project.name)
+                        Button {
+                            expandedProjectID = project.id
+                            if model.selectProject(project.id) {
+                                managingProjectID = project.id; model.showHistory = false; showAppSettings = false
+                            }
+                        } label: { Image(systemName: "gearshape") }
+                            .controlSize(.regular).accessibilityLabel("Settings for " + project.name)
+                    }.disabled(model.busy || model.fatal)
+                    if model.currentProject?.id == project.id || expandedProjectID == project.id {
+                        ViewThatFits(in: .horizontal) {
+                            HStack { cliChips(project.id) }
+                            VStack(alignment: .leading) { cliChips(project.id) }
                         }
-                        Spacer()
-                        Circle().fill(stateColor(model.projectState(project.id))).frame(width: 8, height: 8)
-                        Text(model.projectState(project.id)?.rawValue.capitalized ?? "Checking").font(.system(size: 15))
-                        if model.currentProject?.id == project.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(color(index)) }
                     }
-                    .padding(12).background(color(index).opacity(model.currentProject?.id == project.id ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain).disabled(model.busy)
-                .accessibilityLabel(project.name + ", \(model.controllers(in: project.id).count) CLIs")
-                Button {
-                    if model.selectProjectForManagement(project.id) {
-                        managingProjectID = project.id; model.showHistory = false; showAppSettings = false
-                    }
-                } label: { Image(systemName: "gearshape") }
-                    .disabled(model.busy || model.fatal).accessibilityLabel("Settings for " + project.name)
-                }
-                if model.currentProject?.id == project.id {
-                    ViewThatFits(in: .horizontal) {
-                        HStack { cliChips(project.id) }
-                        VStack(alignment: .leading) { cliChips(project.id) }
-                    }.padding(.horizontal, 12)
-                }
-                }
+                }.padding(10)
+                    .background(color(index).opacity(model.currentProject?.id == project.id ? 0.12 : 0.035), in: RoundedRectangle(cornerRadius: 10))
             }
         }
     }
     @ViewBuilder
     private func cliChips(_ projectID: UUID) -> some View {
         ForEach(model.controllers(in: projectID)) { cli in
-            Button { Task { await model.selectCLIAndOpen(cli.id) } } label: {
+            Button { _ = model.selectCLI(cli.id) } label: {
                 HStack {
                     if model.selectedID == cli.id { Image(systemName: "checkmark.circle.fill") }
                     Text(model.cliTitle(cli.id))
@@ -440,6 +481,11 @@ struct ProjectEditor: View {
                 if let settings = project.codexSettings, !settings.toml.isEmpty {
                     Text(settings.toml).font(.system(size: 15, design: .monospaced)).textSelection(.enabled)
                 }
+            }
+            if project.cli == .claude {
+                Toggle("Submit through Claude Channels (preview)", isOn: Binding(
+                    get: { project.claudeChannel == true }, set: { project.claudeChannel = $0 }))
+                Text("Applies to newly started Claude sessions. Accept development-channel trust in Terminal. Sends queue during work; tool approvals stay in Terminal.").font(.caption).foregroundStyle(.secondary)
             }
             Toggle("Notifications for this project", isOn: $project.notifications.enabled)
             VStack(alignment: .leading, spacing: 10) {

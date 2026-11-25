@@ -10,7 +10,7 @@ See the [changelog](CHANGELOG.md) for what’s new and [verification notes](docs
 
 ## Features
 
-- A single main view with project rows, CLI selection chips, prompt routing, and output copying.
+- A resizable workspace with a project sidebar, prompt editor, always-visible Send bar and CLI output. It lives in the Dock and the menu bar.
 - Multiple independent Codex or Claude Code CLI instances per project, with separate tmux sessions, exact pane identities, hook metadata, and live status.
 - A gear beside each project for Start, Open CLI, Stop, Restart, New CLI, configuration, notification preferences, and side-by-side views.
 - Persistent AR menu access, one additional selected-running-project item, remembered CLI selection and optional keyboard shortcuts.
@@ -19,6 +19,8 @@ See the [changelog](CHANGELOG.md) for what’s new and [verification notes](docs
 - Native lifecycle notifications, timestamped history and interactive replies where readiness permits. Notification clicks open the exact CLI in Terminal, with UI fallback for errors or busy operations.
 - Resizable side-by-side Terminal views while retaining separate CLI windows.
 - Safe quit review, local Markdown checkpoint export, confirmed graceful shutdown and separately confirmed force-stop retries.
+- An optional floating AR circle over Terminal, and optional fill-screen resizing of the target Terminal window after sending.
+- Claude Channels (preview): opt-in delivery into a running Claude Code conversation with receipt acknowledgment.
 
 ## Requirements
 
@@ -50,7 +52,7 @@ You can open `Package.swift` in Xcode. Set `AGENTROUTER_SIGN_IDENTITY` to use yo
 1. Open AgentRouter and click **Add**. Its generic initial examples are Project 1, Project 2 and Project 3; existing saved settings keep their names and IDs.
 2. Set a project name, existing absolute working directory, Codex or Claude Code, an installed absolute executable path, and a unique tmux session name. Save.
 3. Use the gear beside the project, then **Start Agent**. Complete login, directory trust and hook review in **Open CLI** if required.
-4. Click a project row and a CLI chip to select/open its existing session. Selection never starts a stopped agent automatically. The prompt area identifies the selected destination.
+4. Click a project row and a CLI chip to select it inside AgentRouter; this does not open Terminal. Use the project's **Go to CLI** button to open its remembered CLI. Selection never starts a stopped agent automatically. If a remembered CLI was removed, the row offers explicit CLI choices instead of a fallback.
 5. Use the project's gear for lifecycle controls, **Edit Configuration…**, **New CLI**, or **Work side by side**. The gear opens controls without opening Terminal by itself.
 
 Additional CLIs share the same checkout. They are separate conversations, not isolated worktrees, and can edit the same files. Directory changes/removing a project require all of its CLIs to be stopped. Creating an additional instance upgrades settings to version 3; older app versions cannot read that format.
@@ -84,6 +86,17 @@ and unsupported completion/blocker cases are distinguished in the
 the widget only under its readiness checks; structured dialogs and approvals need
 manual CLI interaction.
 
+## Workspace and window
+
+AgentRouter opens as a large, resizable workspace: projects on the left, the prompt editor above and CLI output below a draggable divider. The Send bar stays directly below the prompt preview, and **Clear** sits at the top of the editor. Window size and position are remembered; native macOS full screen is optional.
+
+AgentRouter appears in the Dock and Command–Tab as well as the menu bar. Switching back restores a hidden or minimized workspace. Closing or hiding the window keeps monitoring running; use Quit to exit.
+
+After a successful send and Terminal handoff, **Hide widget after sending** hides AgentRouter. Errors keep it visible, and a delivered prompt is never queued for retry. If exactly one verified split view contains the target CLI, its pane is focused and highlighted; stale or ambiguous split views block sending.
+
+- **Expand CLI to fill screen after sending** (default OFF) resizes only the matched Terminal window to the display's usable area. It does not create a separate full-screen Space or need Accessibility access.
+- **Show floating AR circle over Terminal** (default ON) shows a small draggable circle while Terminal or AgentRouter is active. Click it to show/hide the workspace. Its position is saved. Turn it off in App settings; AR and **Option–Command–R** still work.
+
 ## Notifications, settings and shortcuts
 
 Enable project events under its gear → **Edit Configuration…**, save, and use **Allow macOS Notifications…** for system permission. **Test Notification** checks permission/request delivery without attaching hooks. Hook settings are scoped to AgentRouter launches and do not overwrite native CLI configuration. Native authentication and hook trust still apply.
@@ -106,6 +119,16 @@ Codex approval (`on-request`, `never`) and sandbox (`read-only`, `workspace-writ
 
 Drafts are not persisted or included in checkpoints. Exported replies can themselves contain sensitive material; review before sharing. Logout/shutdown/force quit can affect session survival independently of AgentRouter.
 
+## Claude Channels (preview)
+
+For a stopped Claude project, enable **Submit through Claude Channels (preview)** in its settings, then start a new session. Additional Claude CLIs inherit the setting on their next start; existing sessions are not converted. Accept Claude's folder and development-channel trust prompts in Terminal. Custom channels currently require Claude's development flag and remain subject to organization policy.
+
+**Send & Open CLI** then delivers the prompt through the bundled native `AgentRouterChannel` helper into the same interactive conversation, so you can keep typing in Terminal. The helper uses a run-scoped, owner-only Unix socket with same-user peer checks and a run credential. No Node/npm or TCP port is needed.
+
+A delivered message is not a receipt. Claude is asked to call the helper's `acknowledge` tool with the message ID (this tool may itself need your approval in Terminal). AgentRouter shows a pending notice until then and records `MESSAGE_RECEIVED` in History, which says nothing about task completion. Only one unacknowledged message is allowed per run, and pending IDs survive app restarts. There is no automatic retry, permission approval or keystroke fallback; if delivery is uncertain, check Terminal before retrying.
+
+Stop the main CLI before changing the setting. Projects without it keep the existing submission path, and Paste Only remains available. Build with `scripts/build-app.sh` so both helpers are bundled. To check the helper locally: `swift test`, then `python3 scripts/test-channel.py` against the debug build (no model requests).
+
 ## Privacy and safety
 
 AgentRouter uses exact tmux ownership/run/pane/process identities, never an active Terminal window or guessed pane. Unowned collisions, stale/ambiguous targets and uncertain readiness fail closed. Clipboard bytes enter tmux through a named buffer, never a shell command; no prompt is submitted automatically.
@@ -114,7 +137,7 @@ Local settings/binding metadata/history live under `~/Library/Application Suppor
 
 ## Validation and contributions
 
-The current update compiled successfully. New multi-CLI, quit/shutdown and merged-UI behavior has received static reviews and compilation checks, **not full runtime or automated-test verification**. See [architecture](docs/ARCHITECTURE.md), [verification](docs/VERIFICATION.md) and [review](docs/REVIEW-2026-11-07.md). An optional local design simulation and editable placement JSON are in `docs/ui-demo/`; they do not control real sessions.
+The current release compiled successfully and `swift test` covers core channel and lifecycle logic. Workspace, AR circle, quit and multi-CLI UI behavior has received static reviews, **not full runtime or UI-automation verification**. See [architecture](docs/ARCHITECTURE.md), [verification](docs/VERIFICATION.md) and [review](docs/REVIEW-2026-11-07.md). An optional local design simulation and editable placement JSON are in `docs/ui-demo/`; they do not control real sessions.
 
 For contributors who want to run the existing tests themselves:
 

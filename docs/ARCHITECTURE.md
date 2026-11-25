@@ -96,3 +96,33 @@ visible in the review. A force-stop retry filters fresh identities against the
 original confirmed remaining runs and requires a second confirmation. Failed
 signal delivery rolls back the stopRequested flag. No kill-session/kill-server
 or Terminal window closing is used.
+
+## Two-pane workspace and Terminal handoff
+
+AppDelegate owns a normal resizable WorkspaceWindow, with frame autosave and
+native full-screen support. Hide defers until full-screen exit completes. A
+separate non-key, nonactivating FloatingCircle panel follows frontmost Terminal
+activation, keeps its dragged position in UserDefaults, and hides over unrelated
+apps. It uses no event tap or Accessibility permission. An explicit circle click
+can activate the workspace; passive display and dragging do not.
+
+The project sidebar scrolls independently. A VSplitView divides composer and
+output, while the Send bar sits outside both scrolling regions. Clipboard and
+edited-preview sends remain distinct. After existing readiness validation,
+LifecycleManager.handoffTarget discovers at most one attached split display and
+verifies both original controllers, run IDs and actual nested attachments before
+selecting the exact display pane and applying active-border styling. No input is
+sent to the display pane. If no split display is attached, the verified standalone
+Terminal target is used. Submission still targets the original controller pane.
+
+TerminalLauncher matches exact client TTYs and passes optional screen bounds as
+arguments to static AppleScript. The fill-display option changes only the matched
+window's bounds; it uses no global full-screen keystroke. New tabs get a bounded
+TTY-registration wait. Successful handoff precedes automatic hide; failure after
+delivery clears the delivered draft and warns against duplicate sending.
+
+### Claude channel delivery
+
+Opted-in Claude controllers receive an explicit run-scoped `--mcp-config`, development-channel flag and authorization instructions at startup. `AgentRouterChannel` implements the small MCP stdio surface needed for initialization, tool discovery, receipt acknowledgment and channel notifications. It owns an authenticated `HookServer` endpoint distinct from passive hook IPC. App submission persists a pending message ID before writing; status polling clears it only after the model calls `acknowledge`. Transport acceptance and task completion remain distinct. No prompt body is saved by this bridge. Channel readiness does not depend on terminal editor heuristics, and channel submission never emits terminal keystrokes. The helper requires no globally installed runtime.
+
+Receipt polling is scheduled by health refresh and runs outside the lifecycle actor. In-flight polls are keyed by run and message IDs; callbacks revalidate ownership and stop state. Receipt History and pending-clear updates commit atomically through the settings store. The exact encoded submit frame is validated before the pending reservation is persisted; the same bytes are then sent to IPC.

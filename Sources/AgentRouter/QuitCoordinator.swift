@@ -22,7 +22,7 @@ final class QuitCoordinator: NSObject, ObservableObject, NSWindowDelegate {
         model.quitReviewActive = true
         exportStatus = ""
         pendingStopTargets = []
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 580),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 700, height: 700),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         panel.title = "Before quitting AgentRouter"
         panel.isReleasedWhenClosed = false
@@ -123,42 +123,92 @@ final class QuitCoordinator: NSObject, ObservableObject, NSWindowDelegate {
 private struct QuitReviewView: View {
     @ObservedObject var model: RouterModel
     @ObservedObject var coordinator: QuitCoordinator
+    private var blocked: Bool { model.busy || coordinator.exporting || coordinator.stopping }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Quit AgentRouter").font(.system(size: 24, weight: .bold))
-            Text("Keep CLI sessions running, or stop them before quitting. Monitoring and notifications stop when AgentRouter exits. Terminal windows stay open.")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "power.circle.fill").font(.system(size: 30)).foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Quit AgentRouter").font(.system(size: 24, weight: .bold))
+                    Text("Choose what happens to your agents.").foregroundStyle(.secondary)
+                }
+            }
+            Text("Keep agents running, or stop them before quitting. AgentRouter monitoring and notifications pause while it is closed.")
+                .foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(model.projects) { project in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(project.name + " · " + project.cli.title).bold()
-                            Text("Process: \(model.health[project.id]?.state.rawValue ?? "unverified") · Activity: \(model.activities[project.id]?.kind.rawValue ?? "UNKNOWN")").font(.system(size: 15))
-                        }
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle().fill(statusColor(model.health[project.id]?.state)).frame(width: 9, height: 9).padding(.top, 6)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(project.name + " · " + project.cli.title).fontWeight(.semibold)
+                                Text("Process: \(model.health[project.id]?.state.rawValue ?? "unverified") · Activity: \(model.activities[project.id]?.kind.rawValue ?? "UNKNOWN")")
+                                    .font(.system(size: 15)).foregroundStyle(.secondary)
+                            }
+                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
                     }
-                    ForEach(model.quitWarnings, id: \.self) { warning in Text(warning).foregroundStyle(.orange) }
+                    ForEach(model.quitWarnings, id: \.self) { warning in
+                        Label(warning, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    }
+                    if !coordinator.exportStatus.isEmpty {
+                        Text(coordinator.exportStatus).font(.system(size: 15)).textSelection(.enabled)
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    DisclosureGroup("About quitting and checkpoints") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("A running process does not prove an agent is working. A checkpoint saves available completed replies and session details, not an agent-written handoff or guaranteed saved work.")
+                            Text("Terminal windows stay open. Session survival is not guaranteed during macOS logout, shutdown, or force quit.")
+                        }.padding(.top, 6)
+                    }.font(.system(size: 15)).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Text("A running process does not prove the agent is working. A checkpoint contains available completed replies, not an agent-written handoff or guaranteed saved work.").font(.system(size: 15))
-            Text("Session survival is not guaranteed during macOS logout, shutdown, or force quit.").font(.system(size: 15))
-            if !coordinator.exportStatus.isEmpty {
-                Text(coordinator.exportStatus).font(.system(size: 15)).textSelection(.enabled)
-            }
+            }.frame(minHeight: 100)
             HStack {
-                Button("Cancel") { coordinator.cancel() }.keyboardShortcut(.defaultAction).disabled(coordinator.exporting || coordinator.stopping)
+                Button { coordinator.exportCheckpoint() } label: {
+                    Label(coordinator.exporting ? "Exporting…" : "Export Checkpoint…", systemImage: "square.and.arrow.down")
+                }.buttonStyle(.bordered).tint(.blue).disabled(blocked)
                 Spacer()
-                Button(coordinator.exporting ? "Exporting…" : "Export Checkpoint…") { coordinator.exportCheckpoint() }
-                    .disabled(model.busy || coordinator.exporting || coordinator.stopping)
+                if coordinator.exporting || coordinator.stopping {
+                    ProgressView().controlSize(.small)
+                    Text(coordinator.stopping ? "Waiting for agents to exit…" : "Saving checkpoint…")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
             }
             if !coordinator.pendingStopTargets.isEmpty {
-                Button("Force Stop Remaining…") { coordinator.stopAndQuit(force: true) }
-                    .foregroundStyle(.red).disabled(model.busy || coordinator.exporting || coordinator.stopping)
+                Button(role: .destructive) { coordinator.stopAndQuit(force: true) } label: {
+                    Label("Force Stop Remaining…", systemImage: "exclamationmark.octagon")
+                }.buttonStyle(.bordered).tint(.red).disabled(blocked)
             }
-            HStack {
-                Button("Keep Running & Quit") { coordinator.quit() }
-                Spacer()
-                Button(coordinator.stopping ? "Stopping…" : "Stop Agents & Quit…") { coordinator.stopAndQuit() }
-            }.disabled(model.busy || coordinator.exporting || coordinator.stopping)
-        }.padding(20).font(.system(size: 16)).frame(width: 600, height: 540)
+            Divider()
+            HStack(alignment: .top, spacing: 12) {
+                action("Cancel", subtitle: "Continue working", icon: "arrow.uturn.backward", color: .blue) { coordinator.cancel() }
+                    .keyboardShortcut(.defaultAction).disabled(coordinator.exporting || coordinator.stopping)
+                action("Keep Running & Quit", subtitle: "Agents stay running", icon: "play.circle", color: .green) { coordinator.quit() }
+                    .disabled(blocked)
+                action(coordinator.stopping ? "Stopping…" : "Stop Agents & Quit…", subtitle: "Confirm shutdown", icon: "stop.circle", color: .orange, role: .destructive) { coordinator.stopAndQuit() }
+                    .disabled(blocked).accessibilityHint("Requests shutdown after confirmation and may interrupt active work.")
+            }
+        }.padding(24).font(.system(size: 16)).frame(width: 660, height: 660)
+    }
+
+    private func action(_ title: String, subtitle: String, icon: String, color: Color, role: ButtonRole? = nil, perform: @escaping () -> Void) -> some View {
+        Button(role: role, action: perform) {
+            VStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 23, weight: .medium))
+                Text(title).font(.system(size: 16, weight: .semibold)).multilineTextAlignment(.center)
+                    .lineLimit(2).frame(height: 40)
+                Text(subtitle).font(.system(size: 15)).multilineTextAlignment(.center).lineLimit(2)
+            }.frame(maxWidth: .infinity, minHeight: 112)
+        }.buttonStyle(.borderedProminent).tint(color).controlSize(.large)
+    }
+    private func statusColor(_ state: LifecycleState?) -> Color {
+        switch state {
+        case .running: return .green
+        case .starting, .stopping: return .orange
+        case .failed, .disconnected: return .red
+        default: return .gray
+        }
     }
 }

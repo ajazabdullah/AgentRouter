@@ -60,7 +60,13 @@ final class NotificationBridge: NSObject, UNUserNotificationCenterDelegate {
 }
 
 enum TerminalLauncher {
-    static func open(target: TerminalTarget) async throws {
+    static func open(target: TerminalTarget, fillScreen: Bool = false) async throws {
+        let bounds = await MainActor.run { () -> [String] in
+            guard let screen = NSApp.keyWindow?.screen ?? NSScreen.main, let primary = NSScreen.screens.first else { return [] }
+            let rect = screen.visibleFrame
+            return [rect.minX, primary.frame.maxY - rect.maxY, rect.maxX, primary.frame.maxY - rect.minY].map { String(Int($0)) }
+        }
+        if fillScreen && bounds.isEmpty { throw RouterError.message("Cannot identify a display for the CLI window. Open CLI manually.") }
         try await Task.detached {
             // Match Terminal's actual TTY against clients of the verified tmux session.
             // Focusing an existing tab sends no command or keystroke to it.
@@ -68,7 +74,10 @@ enum TerminalLauncher {
             let source = """
             on run argv
                 set attachCommand to item 1 of argv
-                set attachedTTYs to rest of argv
+                set shouldFill to item 2 of argv is "1"
+                set screenBounds to {item 3 of argv as integer, item 4 of argv as integer, item 5 of argv as integer, item 6 of argv as integer}
+                set attachedTTYs to {}
+                if (count of argv) > 6 then set attachedTTYs to items 7 thru -1 of argv
                 tell application "Terminal"
                     repeat with terminalWindow in windows
                         repeat with terminalTab in tabs of terminalWindow
@@ -77,18 +86,40 @@ enum TerminalLauncher {
                                 set miniaturized of terminalWindow to false
                                 set visible of terminalWindow to true
                                 set index of terminalWindow to 1
+                                if shouldFill then set bounds of terminalWindow to screenBounds
                                 activate
                                 return "reused"
                             end if
                         end repeat
                     end repeat
                     activate
-                    do script attachCommand
+                    set attachedTab to do script attachCommand
+                    if shouldFill then
+                        repeat 50 times
+                            set newTTY to ""
+                            try
+                                set newTTY to tty of attachedTab as text
+                            end try
+                            if newTTY starts with "/dev/" then
+                                repeat with terminalWindow in windows
+                                    repeat with terminalTab in tabs of terminalWindow
+                                        if (tty of terminalTab as text) is newTTY then
+                                            set bounds of terminalWindow to screenBounds
+                                            return "attached"
+                                        end if
+                                    end repeat
+                                end repeat
+                            end if
+                            delay 0.05
+                            end repeat
+                        error "Cannot identify the newly attached Terminal window for resizing."
+                    end if
                     return "attached"
                 end tell
             end run
             """
-            let result = try ProcessRunner.run("/usr/bin/osascript", ["-e", source, target.command] + target.attachedTTYs, timeout: 60)
+            let geometry = bounds.isEmpty ? ["0", "0", "0", "0"] : bounds
+            let result = try ProcessRunner.run("/usr/bin/osascript", ["-e", source, target.command, fillScreen ? "1" : "0"] + geometry + target.attachedTTYs, timeout: 60)
             guard result.status == 0 else { throw RouterError.message("Terminal could not open. Allow AgentRouter to control Terminal in System Settings → Privacy & Security → Automation. \(result.error)") }
         }.value
     }

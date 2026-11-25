@@ -80,6 +80,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var executable: String
     public var session: String
     public var notifications: NotificationPreferences
+    public var claudeChannel: Bool?
     public var codexSettings: CodexSettings?
     public init(id: UUID = UUID(), name: String = "New project", directory: String = "", cli: CLIKind = .codex, executable: String? = nil, session: String? = nil) {
         self.id = id; self.name = name; self.directory = directory; self.cli = cli
@@ -111,6 +112,7 @@ public struct Binding: Codable, Equatable, Sendable {
     public var stopRequested = false
     public var nativeSessionID: String?
     public var transcriptPath: String?
+    public var pendingChannelMessage: String?
 }
 public enum LifecycleState: String, Codable, Sendable {
     case stopped, starting, running, stopping, failed, disconnected
@@ -164,6 +166,7 @@ public struct Workspace: Codable, Sendable {
                                  cli: instance.cli, executable: instance.executable, session: instance.session)
             target.notifications = root.notifications
             target.codexSettings = root.codexSettings
+            target.claudeChannel = root.claudeChannel
             return target
         }
     }

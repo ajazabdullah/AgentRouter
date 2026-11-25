@@ -9,10 +9,7 @@ struct AgentRouterApp: App {
     var body: some Scene { Settings { EmptyView() } }
 }
 @MainActor
-final class FloatingPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-}
+final class WorkspaceWindow: NSWindow {}
 @MainActor
 final class WidgetHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -20,7 +17,13 @@ final class WidgetHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private var item: NSStatusItem!
-    private var panel: FloatingPanel!
+    private var panel: WorkspaceWindow!
+    private var floatingCircle: FloatingCircleController?
+    private var circleSubscription: AnyCancellable?
+    private var activationObserver: NSObjectProtocol?
+    private var lastTerminal: NSRunningApplication?
+    private var fullScreenTransition = false
+    private var hideAfterFullScreenExit = false
     private var model: RouterModel!
     private var quitCoordinator: QuitCoordinator?
     private var quitApproved = false
@@ -31,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var functionKeysSubscription: AnyCancellable?
     private var functionKeyProjects: [String: String] = UserDefaults.standard.dictionary(forKey: "cliFunctionKeyProjects") as? [String: String] ?? [:]
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         model = RouterModel()
         quitCoordinator = QuitCoordinator(model: model) { [weak self] in
             self?.quitApproved = true
@@ -49,13 +52,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.autoenablesItems = false
         menu.delegate = self
         item.menu = menu
-        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 760), styleMask: [.titled, .closable, .utilityWindow, .nonactivatingPanel], backing: .buffered, defer: false)
+        let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 900)
+        let initial = NSRect(x: visible.minX + visible.width * 0.05, y: visible.minY + visible.height * 0.06,
+                             width: max(900, visible.width * 0.9), height: max(620, visible.height * 0.86))
+        panel = WorkspaceWindow(contentRect: initial, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         panel.title = "AgentRouter"
         panel.delegate = self
-        panel.isFloatingPanel = true; panel.level = .floating
-        panel.hidesOnDeactivate = false; panel.becomesKeyOnlyIfNeeded = true
+        panel.level = .normal
+        panel.minSize = NSSize(width: 900, height: 650)
         panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.fullScreenPrimary]
+        panel.setFrameAutosaveName("AgentRouter.WorkspaceWindow")
+        if !panel.setFrameUsingName("AgentRouter.WorkspaceWindow") { panel.setFrame(initial, display: false) }
+        if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(panel.frame) }) { panel.setFrame(initial, display: false) }
         panel.contentView = WidgetHostingView(rootView: RouterWidget(model: model))
         model.onCapture = { [weak self] in
             guard let self else { return }
@@ -63,6 +72,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             else { self.showClipboardIndicator() }
         }
         model.onHide = { [weak self] in self?.hide() }
+        model.onToggleFullScreen = { [weak self] in self?.panel.toggleFullScreen(nil) }
+        floatingCircle = FloatingCircleController { [weak self] in
+            guard let self else { return }
+            if self.model.quitReviewActive { self.quitCoordinator?.present(); return }
+            if self.panel.isVisible && !self.panel.isMiniaturized {
+                self.hide()
+                self.lastTerminal?.activate(options: [])
+            } else { self.showForInteraction() }
+        }
+        circleSubscription = model.$showFloatingCircle.combineLatest(model.$quitReviewActive)
+            .receive(on: RunLoop.main).sink { [weak self] _, _ in self?.updateCircle() }
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.updateCircle() }
+        }
         do {
             globalShortcuts = try GlobalShortcuts { [weak self] id in self?.handleGlobalShortcut(id) }
             functionKeysSubscription = model.$cliFunctionKeysEnabled
@@ -223,6 +246,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if model?.quitReviewActive == true { quitCoordinator?.present(); return true }
         if panel != nil { revealForLaunch() }; return true
     }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard model != nil, panel != nil, !hideAfterFullScreenExit else { return }
+        if model.quitReviewActive { quitCoordinator?.present(); return }
+        if !panel.isVisible || panel.isMiniaturized {
+            show()
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if quitApproved || model == nil { return .terminateNow }
         if model.quitReviewActive || model.needsQuitReview {
@@ -231,14 +263,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         return .terminateNow
     }
-    private func revealForLaunch() { panel.center(); show() }
+    private func revealForLaunch() { showForInteraction() }
+    private func showForInteraction() {
+        guard !model.quitReviewActive else { quitCoordinator?.present(); return }
+        panel.deminiaturize(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        show()
+        panel.makeKeyAndOrderFront(nil)
+        updateCircle()
+    }
+    private func updateCircle() {
+        let app = NSWorkspace.shared.frontmostApplication
+        if app?.bundleIdentifier == "com.apple.Terminal" { lastTerminal = app }
+        let ownWorkspace = app?.processIdentifier == ProcessInfo.processInfo.processIdentifier && panel.isVisible && !panel.isMiniaturized
+        floatingCircle?.setVisible(model.showFloatingCircle && !model.quitReviewActive && (app?.bundleIdentifier == "com.apple.Terminal" || ownWorkspace))
+    }
     private func hide() {
-        guard !model.quitReviewActive else { return }
+        guard !model.quitReviewActive else { hideAfterFullScreenExit = false; return }
+        if fullScreenTransition { hideAfterFullScreenExit = true; return }
+        if panel.styleMask.contains(.fullScreen) {
+            hideAfterFullScreenExit = true
+            panel.toggleFullScreen(nil)
+            return
+        }
         item.isVisible = true
         panel.orderOut(nil)
         model.widgetWasVisible = false
+        updateCircle()
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { hide(); return false }
+    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenTransition = true }
+    func windowWillExitFullScreen(_ notification: Notification) { fullScreenTransition = true }
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        fullScreenTransition = false
+        if hideAfterFullScreenExit { hide() }
+    }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        fullScreenTransition = false
+        if hideAfterFullScreenExit { hideAfterFullScreenExit = false; hide() }
+    }
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        fullScreenTransition = false; hideAfterFullScreenExit = false
+        model.status = "The CLI handoff finished, but macOS could not leave full screen to hide AgentRouter. Exit full screen manually; do not resend the prompt."
+    }
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        fullScreenTransition = false
+        if hideAfterFullScreenExit { hideAfterFullScreenExit = false; hide() }
+    }
     private func showClipboardIndicator() {
         guard !panel.isVisible else { return }
         indicator?.cancel()
@@ -252,11 +323,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func show() {
         guard !model.quitReviewActive else { quitCoordinator?.present(); return }
-        if !panel.isVisible { panel.center() }
+        hideAfterFullScreenExit = false
+        panel.deminiaturize(nil)
         indicator?.cancel()
         item.button?.title = "AR"
         panel.orderFrontRegardless()
         model.widgetWasVisible = true
+        updateCircle()
     }
     @objc private func toggle() { if panel.isVisible { hide() } else { show() } }
 }

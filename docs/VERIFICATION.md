@@ -203,3 +203,96 @@ browser-rendered. Runtime layout and keyboard behavior remain manual checks.
 
 The single release compilation passed in 10.42 seconds. The bundle was installed
 without launching AgentRouter or changing any CLI session.
+
+## Two-pane workspace, CLI handoff and floating AR circle
+
+Claude Sonnet (medium effort) reviewed the uncommitted change by source/diff only.
+Findings covered minimized-window restoration, hiding native full-screen windows,
+and newly attached Terminal TTY registration. Central show now deminiaturizes;
+hide exits full screen before ordering out; new-tab resizing waits for a nonempty
+TTY. The reviewer found no defect in split run/binding verification or display-only
+selection/highlighting. Fixes and the final fixed-bar preview menu were not
+independently re-reviewed.
+
+No tests, UI automation, app launches or live tmux queries/session changes were
+performed. Manual checks remain: small/large/full-screen workspace layout; fixed
+Send and preview routing; settings/history Back; show/hide from circle, AR and
+shortcut; circle drag/monitor changes and hiding over unrelated apps; successful
+handoff versus blocked/failed submission; optional Terminal fill-display; split
+focus/highlight including stale or multiple attached views; failure after text
+delivery does not encourage duplicate sending; quit review remains functional.
+
+The single release compilation passed in 19.39 seconds. The existing non-fatal
+String(cString:) deprecation warning in Checkpoint.swift remains. The built bundle
+was installed without launching it. Review and compilation do not establish that
+native full-screen transitions, Terminal resizing, circle interactions or split
+handoff work at runtime; these remain manual verification items.
+
+## Compact header, Clear placement and Command–Tab (2026-11-11)
+
+The header is now one compact row without the large icon/tagline. Clear moved
+beside the prompt heading. The app uses regular activation and LSUIElement=false
+to appear in the Dock/Command–Tab switcher; activation restores a hidden or
+minimized workspace. Window close remains hide-only and does not terminate the
+app or sessions. The single release compilation passed in 11.29 seconds. No tests,
+app launch, desktop automation or live-session changes were performed. Manual
+checks remain for Dock/Command–Tab restoration, compact layout, notification-click
+handoff and hide/quit behavior.
+
+Prompt/send grouping follow-up: moved the fixed Send bar into the upper split
+pane directly beneath the scrollable prompt preview. Output remains the separate
+lower pane. The upper pane has a minimum height to keep the controls accessible.
+One release compilation passed in 11.33 seconds; no tests, app launch, automation
+or live-session changes were performed. Visual divider behavior remains manual.
+
+## Select projects without leaving the workspace
+
+Project rows, CLI chips and the settings CLI picker now select only. Each project
+has a separate Go to CLI button using the existing remembered/exact controller
+opening path. Menu/global shortcut/notification direct opening is unchanged.
+Claude Sonnet medium reviewed the scoped change read-only. Its stale-remembered
+CLI finding was addressed by exposing that project's literal CLI choices on row
+selection, without a fallback target. Its status wording observation was addressed
+by suppressing selection-only guidance on direct-open paths. These fixes were not
+independently re-reviewed. One release compilation passed in 11.87 seconds.
+No tests, app launch, automation or live-session changes were performed. Sidebar
+selection, stale-CLI recovery and explicit Terminal navigation remain manual checks.
+
+## Quit dialog action layout (2026-11-11)
+
+The three main quit actions are equal-width colored buttons in one row, with
+icons, captions and explicit destructive accessibility semantics. Checkpoint
+export and force-stop remain separate; Cancel remains the default. Long status,
+warnings and disclosure details scroll above the fixed actions. Waiting progress
+is visible while Cancel/shutdown actions are disabled.
+
+Claude Sonnet medium performed a scoped read-only review. It confirmed Cancel and
+operation gates, and raised progress, disclosure-space and destructive-semantic
+observations. The view now exposes wait progress, scrolls disclosure content,
+uses a larger panel and marks stop/force actions destructive. Fixed font sizes
+remain consistent with the rest of the app. One release compilation passed in
+11.45 seconds; subsequent indentation cleanup was whitespace-only. No tests,
+app launch, automation or live-session changes were performed. Final visual layout
+and colors remain manual checks; controller shutdown logic was not changed.
+
+## Native Claude Channels prototype — 2026-11-11
+
+- Built native MCP stdio helper; no external runtime dependencies.
+- Protocol regression script checks MCP initialization, owner-only socket, run credential rejection, literal prompt bytes, duplicate message suppression, explicit acknowledgment, unknown ID rejection and socket cleanup.
+- Swift regression coverage includes legacy settings without channel opt-in, child CLI inheritance, invocation scope, persistence of pending delivery across manager recreation, duplicate blocking and acknowledgment History.
+- Actual Claude Code 2.1.322 smoke test, existing Pro login: built helper delivered a uniquely identified channel prompt; Claude requested the receipt-only acknowledgment tool. User explicitly authorized one call. Native socket status then confirmed acknowledgment and Terminal returned `NATIVE_CHANNEL_OK`. Test-owned tmux server stopped. Evidence and session IDs were retained locally and are not published.
+- Development startup displayed a misleading “no MCP server configured with that name” banner despite successful connection, receipt and response. Treat explicit acknowledgment as evidence of delivery.
+- UI integration compiled and packaged; full click-through of the running app has not been performed. Live projects were not enabled or restarted as part of implementation.
+
+## Channels review fixes — 2026-11-11
+
+- Encode and validate the exact submit envelope before reserving pending delivery. Swift tests cover the exact frame boundary, one byte over, JSON escaping, and recovery from rejected frames without helper delivery or persisted pending state.
+- Malformed/blank/invalid-UTF-8 MCP lines now receive JSON-RPC errors per line. Scalar/array requests receive Invalid Request. Native protocol tests verify that the process, prior acknowledgment ledger, and subsequent valid requests survive.
+- Receipt status I/O runs in detached work, with one in-flight poll per run/message. Completion revalidates the pending ID, run ownership, and stop state. History and cleared pending are saved together; a save failure leaves pending intact for a later poll. Swift tests cover slow receipts, overlapping health calls, lifecycle actor responsiveness, Stop, and ignored receipts after Stop.
+- Readiness and submit operations still perform bounded synchronous I/O; this change specifically removes recurring receipt polling from the lifecycle actor.
+
+Review-fix validation: Swift suite completed 17 tests, with 1 opt-in native-CLI test skipped and zero failures (16 executed). Native helper protocol regression passed with malformed-input and receipt-ledger preservation checks. Release app bundle built and signed. UI inspection encountered another running instance owning the production hook socket; full rebuilt-app click-through was not completed. Project settings and live agent processes were not changed.
+
+## Rebuilt-app UI test — 2026-11-11
+
+Created and configured a disposable Claude project through the app UI, enabled Channels, and used Send & Open CLI → Start & Send. The prompt reached that exact app-owned Terminal conversation. Claude's five-hour usage limit (reset 8pm local) blocked acknowledgment and reply, so full acknowledgment/manual-continuity completion remains unverified in this UI run. The app correctly showed pending receipt and blocked a duplicate Send & Open CLI attempt. Canceled Claude's scheduled post-limit continuation, stopped only the test session through app controls (exit 143), removed the test project, cleared the test draft, and restored the output view. Test evidence was retained locally and is not published. Existing project sessions were not sent input or stopped.

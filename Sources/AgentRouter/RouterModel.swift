@@ -42,6 +42,11 @@ final class RouterModel: ObservableObject {
     @Published var ready = false
     @Published var busy = false
     @Published var quitReviewActive = false
+    @Published var pendingChannelProjects: Set<UUID> = []
+    var channelDeliveryNotice: String? {
+        guard let id = current?.id, pendingChannelProjects.contains(id) else { return nil }
+        return "Channel receipt pending. Check Terminal for trust or acknowledgment prompts. Do not resend; receipt will appear in History."
+    }
     @Published var status = "Loading projects…"
     @Published var source = "No captured text"
     @Published var editing: Project?
@@ -67,6 +72,12 @@ final class RouterModel: ObservableObject {
     @Published var hideWidgetAfterSending = UserDefaults.standard.object(forKey: "hideWidgetAfterSending") as? Bool ?? true {
         didSet { UserDefaults.standard.set(hideWidgetAfterSending, forKey: "hideWidgetAfterSending") }
     }
+    @Published var fillCLIScreenAfterSending = UserDefaults.standard.bool(forKey: "fillCLIScreenAfterSending") {
+        didSet { UserDefaults.standard.set(fillCLIScreenAfterSending, forKey: "fillCLIScreenAfterSending") }
+    }
+    @Published var showFloatingCircle = UserDefaults.standard.object(forKey: "showFloatingCircle") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showFloatingCircle, forKey: "showFloatingCircle") }
+    }
     @Published var fatal = false
     let notifications = NotificationBridge()
     private var manager: LifecycleManager?
@@ -77,6 +88,7 @@ final class RouterModel: ObservableObject {
     private var changeCount = NSPasteboard.general.changeCount
     var onCapture: (() -> Void)?
     var onHide: (() -> Void)?
+    var onToggleFullScreen: (() -> Void)?
     var widgetWasVisible: Bool {
         get { UserDefaults.standard.bool(forKey: "widgetVisible") }
         set { UserDefaults.standard.set(newValue, forKey: "widgetVisible") }
@@ -158,6 +170,7 @@ final class RouterModel: ObservableObject {
             health = nextHealth; projectGroups = refreshedSnapshot.projects; cliInstances = refreshedSnapshot.instances
             projects = refreshedSnapshot.controllers; history = refreshedSnapshot.history
             activities = nextActivities
+            pendingChannelProjects = Set(refreshedSnapshot.bindings.values.filter { $0.pendingChannelMessage != nil }.map(\.projectID))
             if current == nil { selectedID = projects.first?.id }
             if initial {
                 try await manager.saveInitialSettings()
@@ -250,22 +263,27 @@ final class RouterModel: ObservableObject {
         }
         return await selectCLIAndOpen(target)
     }
-    /// Open project controls without launching or focusing any Terminal window.
-    func selectProjectForManagement(_ id: UUID) -> Bool {
+    /// Select the remembered CLI without launching or focusing Terminal.
+    func selectProject(_ id: UUID) -> Bool {
         guard !busy, !fatal, !quitReviewActive, projectGroups.contains(where: { $0.id == id }) else { return false }
         if currentProject?.id == id { return true }
         let target = lastCLIByProject[id.uuidString].flatMap(UUID.init(uuidString:)) ?? id
         guard controllers(in: id).contains(where: { $0.id == target }) else {
-            status = "The remembered CLI no longer exists. Select a CLI explicitly from the AR menu."
+            status = "The remembered CLI no longer exists. Select one of this project's CLI choices explicitly. Nothing was opened."
             return false
         }
-        selectedID = target
+        return selectCLI(target)
+    }
+    @discardableResult
+    func selectCLI(_ id: UUID, announce: Bool = true) -> Bool {
+        guard !busy, !fatal, !quitReviewActive, let project = projects.first(where: { $0.id == id }) else { return false }
+        selectedID = id
+        if announce { status = "Selected \(project.name). Use Go to CLI to open Terminal, or send from the preview." }
         return true
     }
     @discardableResult
     func selectCLIAndOpen(_ id: UUID) async -> Bool {
-        guard !busy, !fatal, !quitReviewActive, projects.contains(where: { $0.id == id }) else { return false }
-        selectedID = id
+        guard selectCLI(id, announce: false) else { return false }
         guard health[id]?.agentHealthy == true else {
             status = "\(current?.name ?? "The selected CLI") is not running. Use Start Agent for this CLI."
             return false
@@ -309,17 +327,13 @@ final class RouterModel: ObservableObject {
         guard let first = current?.id, let second = splitProjectID, first != second else { return }
         await perform({ try await $0.closeSplitView(first: first, second: second) }, success: "Closed only the split display. Both project agents remain running; Open Terminal still works separately.")
     }
-    /// Normal workflow always snapshots the latest pasteboard on the button click.
+    /// Snapshot exactly the visible preview on the button click.
     /// A pending start offer is memory-only and bound to the explicitly selected project.
     func sendAndOpenCLI() async {
         guard !busy, !fatal, !quitReviewActive, let project = current else { return }
-        guard let prompt = NSPasteboard.general.string(forType: .string) else {
-            status = "The clipboard has no plain text. Copy a prompt, then click Send Clipboard & Open Terminal."; return
-        }
+        let prompt = text
         do { try Tmux.validateText(prompt) }
         catch { status = error.localizedDescription; return }
-        changeCount = NSPasteboard.general.changeCount
-        text = prompt; source = "Latest clipboard — Send Clipboard & Open Terminal"
         openFallbackProjectID = nil
         let offer = StartOffer(projectID: project.id, projectName: project.name, prompt: prompt, mode: launchMode)
         let delivered = await perform({ manager in
@@ -329,7 +343,7 @@ final class RouterModel: ObservableObject {
                 return
             }
             try await self.submitAndOpen(manager: manager, offer: offer)
-        }, success: "Prompt submitted; Terminal opened for \(project.name).")
+        }, success: "Prompt sent to \(project.name). For Channels, receipt is pending until Claude acknowledges it; see History and Terminal.")
         if startOffer != nil { status = "Confirm startup for \(project.name). Nothing has been sent." }
         else if delivered { if hideWidgetAfterSending { hideWidget() } }
         else {
@@ -342,6 +356,9 @@ final class RouterModel: ObservableObject {
         startOffer = nil
         let delivered = await perform({ manager in
             try await manager.start(offer.projectID, mode: offer.mode)
+            if try await manager.usesClaudeChannel(offer.projectID) {
+                try await TerminalLauncher.open(target: manager.terminalTarget(offer.projectID))
+            }
             let deadline = Date().addingTimeInterval(10)
             var blocker = "CLI startup readiness is unverified."
             while Date() < deadline {
@@ -353,7 +370,7 @@ final class RouterModel: ObservableObject {
                 try await Task.sleep(for: .milliseconds(250))
             }
             throw RouterError.message("\(offer.projectName) started, but no prompt was sent: \(blocker) Use Open Terminal for manual interaction. No background send remains queued.")
-        }, success: "Prompt submitted; Terminal opened for \(offer.projectName).")
+        }, success: "Prompt sent to \(offer.projectName). For Channels, receipt is pending until Claude acknowledges it; see History and Terminal.")
         if delivered { if hideWidgetAfterSending { hideWidget() } }
         else {
             openFallbackProjectID = offer.projectID
@@ -364,10 +381,14 @@ final class RouterModel: ObservableObject {
         if let issue = await manager.submissionBlocker(offer.projectID) {
             throw RouterError.message("\(offer.projectName): nothing sent. \(issue) Use Open Terminal for manual interaction or the confirmed Paste Only fallback.")
         }
-        let target = try await manager.terminalTarget(offer.projectID)
-        try await manager.paste(offer.prompt, projectID: offer.projectID, confirmedReady: true, submit: true)
-        text = ""; source = "Clipboard prompt submitted to \(offer.projectName)"
-        do { try await TerminalLauncher.open(target: target) }
+        let target = try await manager.handoffTarget(offer.projectID)
+        if try await manager.usesClaudeChannel(offer.projectID) {
+            try await manager.sendChannel(offer.prompt, projectID: offer.projectID)
+        } else {
+            try await manager.paste(offer.prompt, projectID: offer.projectID, confirmedReady: true, submit: true)
+        }
+        if text == offer.prompt { text = ""; source = "Preview submitted to \(offer.projectName)" }
+        do { try await TerminalLauncher.open(target: target, fillScreen: fillCLIScreenAfterSending) }
         catch {
             throw RouterError.message("The prompt was submitted to \(offer.projectName), but Terminal could not open. Do not resend the prompt. Use Open Terminal. \(error.localizedDescription)")
         }
@@ -419,11 +440,22 @@ final class RouterModel: ObservableObject {
     func send(submit: Bool, isReply: Bool = false) async {
         guard canPaste, let id = current?.id else { return }
         let draft = isReply ? reply : text, questionID = isReply ? activity?.questionID : nil
-        let delivered = await perform({ try await $0.paste(draft, projectID: id, confirmedReady: true, submit: submit, replyingTo: questionID) }, success: submit ? "Sent and submitted to the displayed destination." : "Pasted only. Review and submit in the agent terminal.")
-        if delivered {
-            if isReply { reply = "" } else { text = ""; source = "Preview cleared after delivery" }
-            if hideWidgetAfterSending { hideWidget() }
-        } else { status += " Inspect the CLI before retrying if delivery may have begun." }
+        var pasted = false
+        let delivered = await perform({ manager in
+            let target = try await manager.handoffTarget(id)
+            try await manager.paste(draft, projectID: id, confirmedReady: true, submit: submit, replyingTo: questionID)
+            pasted = true
+            try await TerminalLauncher.open(target: target, fillScreen: self.fillCLIScreenAfterSending)
+        }, success: submit ? "Sent and submitted; the selected CLI is open." : "Pasted only. Review and submit in the agent terminal.")
+        if pasted {
+            if isReply {
+                if reply == draft { reply = "" }
+            } else if text == draft {
+                text = ""; source = "Preview cleared after delivery"
+            }
+        }
+        if delivered { if hideWidgetAfterSending { hideWidget() } }
+        else { status += pasted ? " Text was delivered. Do not resend; open the CLI manually." : " Inspect the CLI before retrying if delivery may have begun." }
     }
     func enableNotifications() async {
         do { status = try await notifications.authorize() ? "Notifications authorized. Enable them per project in Settings." : "Notifications are disabled by macOS. History remains available in AgentRouter." }
@@ -435,13 +467,17 @@ final class RouterModel: ObservableObject {
     }
     func clearHistory() async { await perform({ try await $0.clearHistory() }, success: "Notification history cleared.") }
     private func pollClipboard() {
-        guard !quitReviewActive else { return }
+        guard !quitReviewActive, !busy, startOffer == nil else { return }
         let board = NSPasteboard.general
         guard board.changeCount != changeCount else { return }
         changeCount = board.changeCount
-        text = ""; source = "Clipboard changed; destination stays manually selected."
         let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         guard id == "com.openai.chat" || id == "com.anthropic.claudefordesktop" else { return }
+        // Never discard an unsent preview when another clipboard item arrives.
+        guard text.isEmpty else {
+            source = "Clipboard changed; current draft preserved. Paste into the preview to replace it."
+            return
+        }
         capture(source: "Desktop clipboard (frontmost-app heuristic)", automatic: true)
     }
     func capture(source: String = "Manual clipboard capture", automatic: Bool = false) {

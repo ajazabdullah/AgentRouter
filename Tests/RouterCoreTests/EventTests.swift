@@ -25,6 +25,7 @@ final class EventTests: XCTestCase {
         XCTAssertEqual(HookAdapter.interpret(payload("StopFailure"), cli: .claude).kind, .blocked)
         XCTAssertFalse(HookAdapter.interpret(payload("Notification", ["notification_type": .string("elicitation_dialog")]), cli: .claude).idleTextEditor)
         XCTAssertTrue(HookAdapter.interpret(payload("Notification", ["notification_type": .string("idle_prompt")]), cli: .claude).idleTextEditor)
+        XCTAssertFalse(HookAdapter.interpret(payload("Notification", ["notification_type": .string("idle_prompt")]), cli: .codex).idleTextEditor)
     }
     func testAuthenticatedEventsAndFailClosedSubmission() async throws {
         let f = try LifecycleTests.Fixture(cli: .claude); defer { f.cleanup() }

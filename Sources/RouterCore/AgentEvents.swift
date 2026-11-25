@@ -1,6 +1,7 @@
 import Foundation
 
 public enum AgentEventKind: String, Codable, CaseIterable, Sendable {
+    case messageReceived = "MESSAGE_RECEIVED"
     case working = "WORKING", turnFinished = "TURN_FINISHED", completed = "COMPLETED", blocked = "BLOCKED"
     case needsInput = "NEEDS_INPUT", approvalRequired = "APPROVAL_REQUIRED", unknown = "UNKNOWN", exited = "EXITED"
 }

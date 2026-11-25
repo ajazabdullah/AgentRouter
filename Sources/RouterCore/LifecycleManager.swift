@@ -31,6 +31,7 @@ public actor LifecycleManager {
     private var exitReported: Set<String> = []
     private var disconnectReported: Set<String> = []
     private var pendingNotifications: [HistoryEntry] = []
+    private var receiptPolls: Set<String> = []
     private var replyCache: [UUID: (run: String, session: String, stamp: LatestReply.Stamp, text: String)] = [:]
     // Printable separators survive tmux sanitization in Finder/Spotlight non-UTF-8 locales.
     private static let format = "#{session_name}|#{session_id}|#{pane_id}|#{pid}:#{start_time}|#{@ar_project}|#{@ar_run}|#{@ar_pane_run}|#{pane_pid}|#{pane_dead}|#{bracket_paste_flag}|#{pane_in_mode}|#{pane_input_off}|#{pane_dead_status}|#{pane_output_generation}"
@@ -118,7 +119,7 @@ public actor LifecycleManager {
             let all = try panes()
             if all.contains(where: { $0.session == before.session }) {
                 let pane = try ownedPane(before, b, from: all)
-                guard pane.dead || (p.directory == before.directory && p.cli == before.cli && p.executable == before.executable && p.session == before.session) else { throw RouterError.message("Stop the agent before changing its directory, CLI or session.") }
+                guard pane.dead || (p.directory == before.directory && p.cli == before.cli && p.executable == before.executable && p.session == before.session && p.claudeChannel == before.claudeChannel) else { throw RouterError.message("Stop the agent before changing its directory, CLI or session.") }
                 if pane.dead && (p.directory != before.directory || p.cli != before.cli || p.executable != before.executable || p.session != before.session) { try release(p.id) }
             } else { workspace.bindings.removeValue(forKey: p.id.uuidString) }
         }
@@ -186,6 +187,12 @@ public actor LifecycleManager {
         }
         guard !all.contains(where: { $0.session == p.session || $0.project == id.uuidString }) else { throw RouterError.message("Session collision: an existing controller will not be adopted or replaced.") }
         let runID = UUID().uuidString, credential = UUID().uuidString + UUID().uuidString
+        var channelArguments: [String] = []
+        if p.cli == .claude, p.claudeChannel == true {
+            guard let hookHelper else { throw RouterError.message("Claude Channels requires the bundled helpers.") }
+            let helper = URL(fileURLWithPath: hookHelper).deletingLastPathComponent().appendingPathComponent("AgentRouterChannel").path
+            channelArguments = try ClaudeChannel.arguments(helper: helper, run: runID, credential: credential)
+        }
         // The only forcibly replaced process is this newly created inert placeholder.
         // Two argv elements make tmux use direct exec rather than a shell.
         let created = try run(["new-session", "-d", "-P", "-F", "#{session_id}|#{pane_id}", "-s", p.session, "-c", p.directory, "-x", "120", "-y", "36", "/bin/sleep", "86400"])
@@ -203,6 +210,7 @@ public actor LifecycleManager {
             args += try HookConfiguration.arguments(for: p.cli, helper: hookHelper, directory: store.url.deletingLastPathComponent())
             _ = ipcPath
         }
+        args += channelArguments
         let path = AgentEnvironment.path(for: p.executable)
         var spawn = ["respawn-pane", "-k", "-t", ids[1], "-c", p.directory,
                      "-e", "AR_PROJECT=" + id.uuidString, "-e", "AR_RUN=" + runID, "-e", "AR_TOKEN=" + credential]
@@ -227,6 +235,17 @@ public actor LifecycleManager {
     }
     public func health() throws -> [UUID: ProjectHealth] {
         let all = try panes(), processes = try ProcessTable.entries()
+        for p in workspace.controllers {
+            guard let b = workspace.bindings[p.id.uuidString], let message = b.pendingChannelMessage,
+                  let pane = try? ownedPane(p, b, from: all), !pane.dead, !b.stopRequested else { continue }
+            let key = b.runID + ":" + message
+            guard receiptPolls.insert(key).inserted else { continue }
+            // Socket timeouts must not hold the lifecycle actor or delay Stop/Quit.
+            Task.detached { [weak self] in
+                let accepted = (try? ClaudeChannel.request(run: b.runID, credential: b.credential, operation: "status", id: message)) == true
+                await self?.finishReceiptPoll(projectID: p.id, run: b.runID, message: message, accepted: accepted)
+            }
+        }
         var result: [UUID: ProjectHealth] = [:]
         for p in workspace.controllers {
             guard let b = workspace.bindings[p.id.uuidString] else {
@@ -255,6 +274,19 @@ public actor LifecycleManager {
             }
         }
         return result
+    }
+    private func finishReceiptPoll(projectID: UUID, run: String, message: String, accepted: Bool) {
+        receiptPolls.remove(run + ":" + message)
+        guard accepted, let p = try? project(projectID), var b = workspace.bindings[projectID.uuidString],
+              b.runID == run, b.pendingChannelMessage == message, !b.stopRequested,
+              let all = try? panes(), let pane = try? ownedPane(p, b, from: all), !pane.dead else { return }
+        // Commit receipt and history together. A disk failure leaves pending intact for a later poll.
+        var updated = workspace
+        b.pendingChannelMessage = nil; updated.bindings[projectID.uuidString] = b
+        updated.history.append(HistoryEntry(projectID: p.id, projectName: p.name, kind: .messageReceived,
+            evidence: "Claude acknowledged receipt of channel message " + message + "; task completion unknown"))
+        updated.history = Array(updated.history.suffix(500))
+        do { try store.save(updated); workspace = updated } catch { return }
     }
     public func stop(_ id: UUID, confirmedInterrupt: Bool) throws {
         guard confirmedInterrupt else { throw RouterError.message("Stopping may interrupt active work and requires confirmation.") }
@@ -370,6 +402,24 @@ public actor LifecycleManager {
         _ = try ownedPane(right, rightBinding, from: checked)
         return target
     }
+    public func handoffTarget(_ id: UUID) throws -> TerminalTarget {
+        guard let (first, second) = try SplitWorkspace.attachedPair(tmux, containing: id) else { return try terminalTarget(id) }
+        let left = try project(first), right = try project(second)
+        let leftBinding = try binding(first), rightBinding = try binding(second)
+        let all = try panes(), processes = try ProcessTable.entries()
+        for (project, binding) in [(left, leftBinding), (right, rightBinding)] {
+            let pane = try ownedPane(project, binding, from: all)
+            guard !pane.dead, !binding.stopRequested, agentExists(project, pane: pane, processes: processes) else {
+                throw RouterError.message("The split view contains a stopped or unverified agent. Reopen it or use the standalone CLI.")
+            }
+        }
+        let target = try SplitWorkspace.focus(tmux: tmux, controllerSocket: socket, first: left, second: right,
+                                              firstBinding: leftBinding, secondBinding: rightBinding, selected: id)
+        let checked = try panes()
+        _ = try ownedPane(left, leftBinding, from: checked)
+        _ = try ownedPane(right, rightBinding, from: checked)
+        return target
+    }
     public func closeSplitView(first: UUID, second: UUID) throws {
         guard first != second else { throw RouterError.message("Choose the two projects whose split view should close.") }
         try SplitWorkspace.close(tmux: tmux, first: first, second: second)
@@ -415,18 +465,56 @@ public actor LifecycleManager {
                   agentExists(p, pane: pane, processes: try ProcessTable.entries()) else {
                 return "The configured CLI process is not running or verified."
             }
+            if b.configuration.cli == .claude, b.configuration.claudeChannel == true {
+                guard b.pendingChannelMessage == nil else { return "A channel message is awaiting acknowledgment. Inspect Terminal; do not resend. Restart only after reviewing possible delivery." }
+                guard (try? ClaudeChannel.request(run: b.runID, credential: b.credential, operation: "ready", id: UUID().uuidString)) == true else {
+                    return "Claude channel is not ready. Open Terminal and accept folder/development-channel trust; check channel policy and helper status."
+                }
+                return nil
+            }
             guard pane.bracketed, !pane.inMode, !pane.inputOff else {
                 return "The CLI has not established a verified text-input editor."
             }
             guard let activity = live[id], activity.canSubmit(now: Date()),
                   activity.outputGeneration == pane.outputGeneration else {
+                if p.cli == .codex {
+                    return "Automatic submission is unavailable for Codex in the current terminal integration: its hooks do not establish verified input readiness. Check the CLI, use Send preview → Paste Only, then press Enter in Terminal."
+                }
                 return "No fresh, verified idle signal is available. The agent may be busy, awaiting authentication, or showing a question/approval dialog."
             }
             return nil
         } catch { return error.localizedDescription }
     }
+    public func usesClaudeChannel(_ id: UUID) throws -> Bool {
+        let b = try binding(id)
+        return b.configuration.cli == .claude && b.configuration.claudeChannel == true
+    }
+    /// Reserve the ID on disk before I/O. An uncertain write never becomes an automatic retry.
+    public func sendChannel(_ text: String, projectID id: UUID) throws {
+        try Tmux.validateText(text)
+        guard try usesClaudeChannel(id) else { throw RouterError.message("This session was not started with Claude Channels.") }
+        if let issue = submissionBlocker(id) { throw RouterError.message(issue) }
+        var b = try binding(id)
+        let message = UUID().uuidString
+        let frame = try ClaudeChannel.encodeRequest(credential: b.credential, operation: "submit", id: message, text: text)
+        var updated = workspace
+        b.pendingChannelMessage = message; updated.bindings[id.uuidString] = b
+        try store.save(updated); workspace = updated
+        do {
+            guard try LocalIPC.send(frame, path: ClaudeChannel.socket(run: b.runID)) else {
+                throw RouterError.message("Channel did not confirm the transport write.")
+            }
+        } catch {
+            throw RouterError.message("Channel delivery is uncertain (message " + message + "). Inspect Terminal before any retry. " + error.localizedDescription)
+        }
+        live[id]?.revoke()
+    }
     public static func shellQuote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
     public func paste(_ text: String, projectID id: UUID, confirmedReady: Bool, submit: Bool = false, replyingTo: String? = nil) throws {
+        if submit, try usesClaudeChannel(id) {
+            guard replyingTo == nil else { throw RouterError.message("Answer structured questions and approvals in Terminal.") }
+            try sendChannel(text, projectID: id); return
+        }
         guard confirmedReady else { throw RouterError.message("Confirm that the agent input is ready.") }
         try Tmux.validateText(text)
         let p = try project(id), b = try binding(id)

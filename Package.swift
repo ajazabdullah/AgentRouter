@@ -8,6 +8,7 @@ let package = Package(
         .target(name: "RouterCore"),
         .executableTarget(name: "AgentRouter", dependencies: ["RouterCore"]),
         .executableTarget(name: "AgentRouterHook", dependencies: ["RouterCore"]),
+        .executableTarget(name: "AgentRouterChannel", dependencies: ["RouterCore"]),
         .testTarget(name: "RouterCoreTests", dependencies: ["RouterCore"])
     ]
 )

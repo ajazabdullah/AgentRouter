@@ -60,6 +60,57 @@ enum SplitWorkspace {
             return matches[0].pid == pane.pid && matches[0].session == target
         }
     }
+    /// Reuse only an already attached view. Multiple candidate views are ambiguous.
+    static func attachedPair(_ tmux: String, containing id: UUID) throws -> (UUID, UUID)? {
+        let result = try ProcessRunner.run(tmux, ["-L", socket, "-f", "/dev/null", "list-sessions", "-F", "#{session_id}|#{@ar_split_owner}|#{@ar_split_pair}"])
+        if result.status != 0 {
+            if ["no server running", "No such file or directory", "Connection refused"].contains(where: result.error.contains) { return nil }
+            throw RouterError.message("Cannot verify open split views: \(result.error)")
+        }
+        let clients = try run(tmux, ["list-clients", "-F", "#{session_id}|#{client_tty}"])
+        let attached = Set(clients.split(separator: "\n").compactMap { row -> String? in
+            let fields = row.split(separator: "|", omittingEmptySubsequences: false)
+            return fields.count == 2 && fields[1].hasPrefix("/dev/") ? String(fields[0]) : nil
+        })
+        var candidates: [(UUID, UUID)] = []
+        for row in result.output.split(separator: "\n") {
+            let fields = row.split(separator: "|", omittingEmptySubsequences: false)
+            guard fields.count == 3, fields[1] == owner, attached.contains(String(fields[0])) else { continue }
+            let pair = fields[2].split(separator: ":")
+            guard pair.count == 2, let first = UUID(uuidString: String(pair[0])), let second = UUID(uuidString: String(pair[1])), first != second else { continue }
+            if first == id || second == id { candidates.append((first, second)) }
+        }
+        guard candidates.count <= 1 else { throw RouterError.message("This CLI appears in multiple open split views. Close extra split displays or use Open CLI explicitly before sending.") }
+        return candidates.first
+    }
+
+    static func focus(tmux: String, controllerSocket: String, first: Project, second: Project,
+                      firstBinding: Binding, secondBinding: Binding, selected: UUID) throws -> TerminalTarget {
+        let pair = first.id.uuidString + ":" + second.id.uuidString
+        let name = "ar-" + first.id.uuidString + "-" + second.id.uuidString
+        guard selected == first.id || selected == second.id,
+              let session = try find(tmux, name: name, pair: pair) else { throw RouterError.message("The split display disappeared. Nothing was submitted.") }
+        let runs = try run(tmux, ["show-options", "-qv", "-t", session, "@ar_split_runs"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard runs == firstBinding.runID + ":" + secondBinding.runID,
+              try bindingsMatch(tmux, session: session, controllerSocket: controllerSocket, expected: [firstBinding.sessionID, secondBinding.sessionID]) else {
+            throw RouterError.message("The split display has stale or switched controllers. Reopen Split View to verify it before sending.")
+        }
+        let display = try panes(tmux, session: session)
+        let pane = display[selected == first.id ? 0 : 1]
+        let zoomed = try run(tmux, ["display-message", "-p", "-t", pane.id, "#{window_zoomed_flag}"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if zoomed == "1" { _ = try run(tmux, ["resize-pane", "-Z", "-t", pane.id]) }
+        _ = try run(tmux, ["set-option", "-w", "-t", pane.id, "pane-active-border-style", "fg=colour39,bold"])
+        _ = try run(tmux, ["set-option", "-w", "-t", pane.id, "pane-border-style", "fg=colour240"])
+        _ = try run(tmux, ["select-pane", "-t", pane.id])
+        let output = try run(tmux, ["list-clients", "-F", "#{session_id}|#{client_tty}"])
+        let ttys = output.split(separator: "\n").compactMap { row -> String? in
+            let fields = row.split(separator: "|", omittingEmptySubsequences: false)
+            return fields.count == 2 && fields[0] == session && fields[1].hasPrefix("/dev/") ? String(fields[1]) : nil
+        }
+        guard !ttys.isEmpty else { throw RouterError.message("The split Terminal attachment disappeared. Open CLI manually before retrying.") }
+        let command = [tmux, "-L", socket, "attach-session", "-t", session].map(LifecycleManager.shellQuote).joined(separator: " ")
+        return TerminalTarget(command: command, attachedTTYs: ttys)
+    }
     static func target(tmux: String, controllerSocket: String, first: Project, second: Project,
                        firstBinding: Binding, secondBinding: Binding, balance: Bool) throws -> TerminalTarget {
         let pair = first.id.uuidString + ":" + second.id.uuidString

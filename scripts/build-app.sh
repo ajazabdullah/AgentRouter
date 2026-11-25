@@ -6,6 +6,7 @@ APP="$PWD/.build/AgentRouter.app"
 mkdir -p "$APP/Contents/MacOS"
 cp .build/release/AgentRouter "$APP/Contents/MacOS/AgentRouter"
 cp .build/release/AgentRouterHook "$APP/Contents/MacOS/AgentRouterHook"
+cp .build/release/AgentRouterChannel "$APP/Contents/MacOS/AgentRouterChannel"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -16,15 +17,16 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>AgentRouter</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.3.0</string>
+<key>CFBundleVersion</key><string>3</string>
 <key>NSAppleEventsUsageDescription</key><string>Attach Terminal to your selected AgentRouter agent session.</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
-<key>LSUIElement</key><true/>
+<key>LSUIElement</key><false/>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
 SIGN_IDENTITY="${AGENTROUTER_SIGN_IDENTITY:--}"
 codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/AgentRouterHook"
+codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/AgentRouterChannel"
 codesign --force --sign "$SIGN_IDENTITY" "$APP"
 echo "Built $APP"

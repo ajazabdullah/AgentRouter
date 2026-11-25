@@ -88,7 +88,10 @@ final class LifecycleTests: XCTestCase {
         try await recovered.paste(prompt, projectID: f.project.id, confirmedReady: true)
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(try Data(contentsOf: f.directory.appendingPathComponent("received.bin")), Data(("\u{1b}[200~" + prompt + "\u{1b}[201~").utf8))
+        let blocker = await recovered.submissionBlocker(f.project.id)
+        XCTAssertTrue(blocker?.contains("Automatic submission is unavailable for Codex") == true)
         do { try await recovered.paste("no submit", projectID: f.project.id, confirmedReady: true, submit: true); XCTFail("No readiness") } catch {}
+        XCTAssertEqual(try Data(contentsOf: f.directory.appendingPathComponent("received.bin")), Data(("\u{1b}[200~" + prompt + "\u{1b}[201~").utf8), "Rejected submission must not paste text or send Enter")
         do { try await recovered.removeProject(f.project.id); XCTFail("Cannot remove live agent") } catch {}
         try await recovered.stop(f.project.id, confirmedInterrupt: true)
         for _ in 0..<50 {
