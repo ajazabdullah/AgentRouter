@@ -52,7 +52,7 @@ You can open `Package.swift` in Xcode. Set `AGENTROUTER_SIGN_IDENTITY` to use yo
 1. Open AgentRouter and click **Add**. Its generic initial examples are Project 1, Project 2 and Project 3; existing saved settings keep their names and IDs.
 2. Set a project name, existing absolute working directory, Codex or Claude Code, an installed absolute executable path, and a unique tmux session name. Save.
 3. Use the gear beside the project, then **Start Agent**. Complete login, directory trust and hook review in **Open CLI** if required.
-4. Click a project row and a CLI chip to select it inside AgentRouter; this does not open Terminal. Use the project's **Go to CLI** button to open its remembered CLI. Selection never starts a stopped agent automatically. If a remembered CLI was removed, the row offers explicit CLI choices instead of a fallback.
+4. Click a project row and a CLI chip to select it inside AgentRouter; this does not open Terminal. Use the project's **Go to CLI** button to open its remembered CLI. Icons beside it start (▶), stop (■) or restart (↻) that CLI without opening the gear; stop and restart ask first. Restart also recovers a CLI whose session was lost, for example after tmux restarted. Selection never starts a stopped agent automatically. If a remembered CLI was removed, the row offers explicit CLI choices instead of a fallback.
 5. Use the project's gear for lifecycle controls, **Edit Configuration…**, **New CLI**, or **Work side by side**. The gear opens controls without opening Terminal by itself.
 
 Additional CLIs share the same checkout. They are separate conversations, not isolated worktrees, and can edit the same files. Directory changes/removing a project require all of its CLIs to be stopped. Creating an additional instance upgrades settings to version 3; older app versions cannot read that format.
@@ -97,9 +97,15 @@ After a successful send and Terminal handoff, **Hide widget after sending** hide
 - **Expand CLI to fill screen after sending** (default OFF) resizes only the matched Terminal window to the display's usable area. It does not create a separate full-screen Space or need Accessibility access.
 - **Show floating AR circle over Terminal** (default ON) shows a small draggable circle while Terminal or AgentRouter is active. Click it to show/hide the workspace. Its position is saved. Turn it off in App settings; AR and **Option–Command–R** still work.
 
+## AR menu
+
+Click **AR** in the menu bar. **Running CLIs** at the top lists every live CLI as *Project · CLI — state*; one click opens it in Terminal. A green dot marks a CLI that is working on a turn and an orange dot one that needs your input or approval; those CLIs, and their projects, are listed first. Idle and stopped CLIs are unmarked. Each entry names its state (Working, Needs you, Idle, Stopped…). Activity comes from CLI hooks, so a CLI without a recent hook event shows as Idle. Project submenus still offer **Start new … CLI**.
+
 ## Notifications, settings and shortcuts
 
 Enable project events under its gear → **Edit Configuration…**, save, and use **Allow macOS Notifications…** for system permission. **Test Notification** checks permission/request delivery without attaching hooks. Hook settings are scoped to AgentRouter launches and do not overwrite native CLI configuration. Native authentication and hook trust still apply.
+
+Finished-turn notifications show the last sentence of the latest verified reply, so you can tell "still working" from "needs you" without opening Terminal. The preview is not stored in History; turn it off under App settings → **Show reply preview in notifications**.
 
 Clicking a notification opens the corresponding CLI in Terminal, reusing an attached tab where possible. If that cannot proceed, AgentRouter displays the problem. Notification clicks do not start a CLI or send input. History stores metadata rather than prompt/reply bodies.
 

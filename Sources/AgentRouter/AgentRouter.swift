@@ -161,6 +161,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func compactProjectTitle(_ name: String) -> String {
         name.count > 10 ? String(name.prefix(10)) + "…" : name
     }
+    /// Menu priority: 0 working, 1 needs you, 2 idle but alive, 3 not running.
+    private func menuRank(_ id: UUID) -> Int {
+        guard model.health[id]?.state == .running else { return 3 }
+        switch model.activities[id]?.kind {
+        case .working?: return 0
+        case .needsInput?, .approvalRequired?, .blocked?: return 1
+        default: return 2
+        }
+    }
+    private func rankDot(_ rank: Int) -> NSImage? {
+        rank == 0 ? Self.statusDot(.systemGreen) : rank == 1 ? Self.statusDot(.systemOrange) : nil
+    }
+    /// Stable sort by rank so equal-ranked items keep their configured order.
+    private func byRank<T>(_ items: [T], _ rank: (T) -> Int) -> [T] {
+        items.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    }
+    /// One clickable CLI entry; only working (green) and needs-you (orange) CLIs get a dot.
+    private func cliMenuItem(_ id: UUID, title: String) -> NSMenuItem {
+        let entry = NSMenuItem(title: title + " — " + menuStatus(id), action: #selector(openProjectFromMenu(_:)), keyEquivalent: "")
+        entry.representedObject = id.uuidString; entry.target = self
+        entry.state = id == model.selectedID ? .on : .off
+        entry.image = rankDot(menuRank(id))
+        entry.isEnabled = !model.busy && !model.fatal && !model.quitReviewActive
+        return entry
+    }
+    private func menuStatus(_ id: UUID) -> String {
+        guard let state = model.health[id]?.state else { return "Checking" }
+        guard state == .running else { return state.rawValue.capitalized }
+        switch menuRank(id) {
+        case 0: return "Working"
+        case 1: return "Needs you"
+        default: return "Idle"
+        }
+    }
+    private static func statusDot(_ color: NSColor) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular).applying(.init(paletteColors: [color]))
+        return NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+    }
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let showItem = NSMenuItem(title: "Show AgentRouter", action: #selector(showFromMenu), keyEquivalent: "r")
@@ -173,17 +211,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         hideItem.isEnabled = panel.isVisible && !model.quitReviewActive
         menu.addItem(hideItem)
         menu.addItem(.separator())
-        for project in model.projectGroups {
+        let live = byRank(model.projectGroups.flatMap { project in
+            model.controllers(in: project.id).filter { menuRank($0.id) < 3 }.map { (project, $0) }
+        }) { menuRank($0.1.id) }
+        if !live.isEmpty {
+            let header = NSMenuItem(title: "Running CLIs", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for (project, cli) in live {
+                menu.addItem(cliMenuItem(cli.id, title: project.name + " · " + model.cliTitle(cli.id)))
+            }
+            menu.addItem(.separator())
+        }
+        let projectRank: (UUID) -> Int = { id in self.model.controllers(in: id).map { self.menuRank($0.id) }.min() ?? 3 }
+        for project in byRank(model.projectGroups, { projectRank($0.id) }) {
             let groupItem = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: project.name)
             submenu.autoenablesItems = false
-            for cli in model.controllers(in: project.id) {
-                let state = model.health[cli.id]?.state.rawValue.capitalized ?? "Checking"
-                let entry = NSMenuItem(title: model.cliTitle(cli.id) + " — " + state, action: #selector(openProjectFromMenu(_:)), keyEquivalent: "")
-                entry.representedObject = cli.id.uuidString; entry.target = self
-                entry.state = cli.id == model.selectedID ? .on : .off
-                entry.isEnabled = !model.busy && !model.fatal && !model.quitReviewActive
-                submenu.addItem(entry)
+            for cli in byRank(model.controllers(in: project.id), { menuRank($0.id) }) {
+                submenu.addItem(cliMenuItem(cli.id, title: model.cliTitle(cli.id)))
             }
             submenu.addItem(.separator())
             for cli in CLIKind.allCases {
@@ -192,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 entry.target = self; entry.isEnabled = !model.busy && !model.fatal && !model.quitReviewActive
                 submenu.addItem(entry)
             }
+            groupItem.image = rankDot(projectRank(project.id))
             groupItem.submenu = submenu
             menu.addItem(groupItem)
         }

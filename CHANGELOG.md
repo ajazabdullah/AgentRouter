@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.1 — 2026-11-27 — Reply previews, a clearer AR menu and one-click lifecycle
+
+### Added
+
+- **Reply preview in notifications:** finished-turn notifications show the last sentence of the verified latest reply (about 100 characters, cut at a word), so "still running" or "waiting for you" is readable without opening Terminal. Display-only; never stored in History. Toggle under App settings → Notifications (default ON).
+- **AR menu:** a **Running CLIs** section at the top gives one-click access to every live CLI. A green dot marks a CLI that is working, an orange dot one that needs input or approval; those, and their projects, are listed first. Idle and stopped CLIs are unmarked.
+- **Row lifecycle icons:** ▶ start, ■ stop and ↻ restart beside **Go to CLI** for the project's remembered CLI. Stop and restart ask for confirmation.
+
+### Fixed
+
+- **Restart** was disabled when a CLI's tmux session no longer existed (for example after the tmux server restarted), forcing a manual close and a new CLI. Restart now starts a fresh session in that case, and waits up to 10 seconds (was 5) for a running CLI to exit before reporting, with Force Stop suggested.
+- Notifications from one refresh are posted in order, one at a time.
+
+### Validation and limitations
+
+- `swift test`: 25 tests pass (1 opt-in native test skipped), including 8 for reply-preview extraction. A Claude Code review of all changes found 6 issues (2 important, 4 minor); all were fixed.
+- Reply previews, menu ordering and row icons were checked in the installed app only partially (preview appearance confirmed by the user); no UI automation.
+- A preview is read shortly after the hook fires. AgentRouter waits and retries once and omits a preview that matches the previous one, but it cannot fully rule out showing an earlier reply if the transcript is written late.
+- Menu activity comes from CLI hooks; a CLI with no hook event since AgentRouter started shows as Idle.
+
 ## v0.3.0 — 2026-11-25 — Two-pane workspace, CLI handoff and Claude Channels
 
 ### Added

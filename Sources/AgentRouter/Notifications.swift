@@ -36,7 +36,7 @@ final class NotificationBridge: NSObject, UNUserNotificationCenterDelegate {
         let delivered = await center.deliveredNotifications().contains { $0.request.identifier == entry.id.uuidString }
         return "Authorization: \(state). Test request \(entry.id.uuidString) accepted without errors. In delivered list: \(delivered ? "yes" : "not yet"). Click the notification to open the CLI for \(project.name)."
     }
-    func post(_ entry: HistoryEntry) async throws {
+    func post(_ entry: HistoryEntry, preview: String? = nil) async throws {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
@@ -44,7 +44,12 @@ final class NotificationBridge: NSObject, UNUserNotificationCenterDelegate {
         }
         let content = UNMutableNotificationContent()
         content.title = entry.projectName + " · " + entry.kind.rawValue
-        content.body = "Click to open this project's CLI in Terminal. " + entry.evidence
+        if let preview {
+            // No subtitle: macOS banners show about two body lines, so give them all to the reply.
+            content.body = preview
+        } else {
+            content.body = "Click to open this project's CLI in Terminal. " + entry.evidence
+        }
         content.sound = .default
         content.userInfo = ["projectID": entry.projectID.uuidString]
         try await center.add(UNNotificationRequest(identifier: entry.id.uuidString, content: content, trigger: nil))

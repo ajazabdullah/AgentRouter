@@ -1,5 +1,13 @@
 # Verification
 
+## v0.3.1 — 2026-11-27
+
+- `swift build -c release` and `swift test` pass: 25 tests, 1 opt-in native test skipped. `ReplyPreviewTests` cover last-sentence selection, markdown/code-block stripping, hard-wrapped paragraphs, closing quotes/brackets, and start-preserving truncation.
+- A Claude Code review (`/code-review --fix`) of all v0.3.1 changes reported 6 findings: stale first preview without a baseline and out-of-order notification posting (important); wrapped-line sentence splitting, leading-quote trimming, doubled periods and misleading removed-CLI help text (minor). All were fixed and the suite was rerun.
+- SIGTERM shutdown of idle Claude Code and Codex was checked on a separate, test-owned tmux server: both exited within about 600 ms with the pane kept for inspection. No user session was signalled.
+- Root cause of the reported Restart failure was confirmed read-only: after the managed tmux server restarted, the original Main CLI bindings referred to sessions that no longer existed, so Restart and Stop were disabled. The fix routes Restart to a fresh start in that state. The fixed Restart path was not run against a real session.
+- The installed app showed notification previews (user-confirmed). AR menu ordering/dots and the row icons were built and installed but not verified by UI automation.
+
 ## Split View update — 2026-11-10
 
 The optional two-project display workspace compiled successfully in the release

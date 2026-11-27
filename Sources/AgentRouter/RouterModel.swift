@@ -78,8 +78,36 @@ final class RouterModel: ObservableObject {
     @Published var showFloatingCircle = UserDefaults.standard.object(forKey: "showFloatingCircle") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showFloatingCircle, forKey: "showFloatingCircle") }
     }
+    @Published var showReplyPreviewInNotifications = UserDefaults.standard.object(forKey: "showReplyPreviewInNotifications") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showReplyPreviewInNotifications, forKey: "showReplyPreviewInNotifications") }
+    }
     @Published var fatal = false
     let notifications = NotificationBridge()
+    /// In-memory only: last preview shown per CLI, used to detect a transcript not yet flushed.
+    private var lastNotificationPreview: [UUID: String] = [:]
+    /// Serializes notification posts so the preview retry cannot reorder or race them.
+    private var notificationChain: Task<Void, Never>?
+
+    private func postNotification(_ entry: HistoryEntry, manager: LifecycleManager) async {
+        var preview: String?
+        if showReplyPreviewInNotifications, entry.kind == .turnFinished || entry.kind == .completed {
+            // Without an earlier preview there is no baseline to detect an unflushed transcript, so give it time first.
+            if lastNotificationPreview[entry.projectID] == nil { try? await Task.sleep(for: .milliseconds(800)) }
+            preview = await replyPreview(entry.projectID, manager: manager)
+            if preview != nil, preview == lastNotificationPreview[entry.projectID] {
+                // The hook can fire just before the transcript is written; retry once and omit an unchanged preview.
+                try? await Task.sleep(for: .milliseconds(800))
+                preview = await replyPreview(entry.projectID, manager: manager)
+                if preview == lastNotificationPreview[entry.projectID] { preview = nil }
+            }
+            if let preview { lastNotificationPreview[entry.projectID] = preview }
+        }
+        do { try await notifications.post(entry, preview: preview) } catch { status = "Notification failed: \(error.localizedDescription)" }
+    }
+    private func replyPreview(_ id: UUID, manager: LifecycleManager) async -> String? {
+        guard let reply = try? await manager.latestReply(id) else { return nil }
+        return ReplyPreview.lastSentences(reply)
+    }
     private var manager: LifecycleManager?
     private var server: HookServer?
     private var timer: Timer?
@@ -180,8 +208,13 @@ final class RouterModel: ObservableObject {
                     status = "Choose a project, configure its directory, and press Start Agent."
                 }
             }
-            for entry in await manager.drainNotifications() {
-                do { try await notifications.post(entry) } catch { status = "Notification failed: \(error.localizedDescription)" }
+            let entries = await manager.drainNotifications()
+            if !entries.isEmpty {
+                let previous = notificationChain
+                notificationChain = Task {
+                    await previous?.value
+                    for entry in entries { await postNotification(entry, manager: manager) }
+                }
             }
             await refreshOutput()
         } catch { status = error.localizedDescription; health = [:]; ready = false }
@@ -219,14 +252,20 @@ final class RouterModel: ObservableObject {
         let mode = launchMode
         await perform({ manager in
             var health = try await manager.health()[id]
+            // Lost session (e.g. tmux server restarted) or never started: nothing to stop, start fresh.
+            if health?.paneID == nil {
+                try await manager.start(id, mode: mode)
+                try await self.verifyStartupAndOpenTerminal(id, manager: manager)
+                return
+            }
             if health?.paneDead != true {
                 try await manager.stop(id, confirmedInterrupt: true)
-                for _ in 0..<50 {
+                for _ in 0..<100 {
                     health = try await manager.health()[id]
                     if health?.paneDead == true { break }
                     try await Task.sleep(for: .milliseconds(100))
                 }
-                guard health?.paneDead == true else { throw RouterError.message("The agent is still stopping. Restart did not force-stop it; wait and try again.") }
+                guard health?.paneDead == true else { throw RouterError.message("The agent did not exit within 10 seconds, so nothing was restarted. Wait and press Restart again, or use More → Force Stop.") }
             }
             try await manager.restart(id, mode: mode)
             try await self.verifyStartupAndOpenTerminal(id, manager: manager)
@@ -262,6 +301,24 @@ final class RouterModel: ObservableObject {
             target = remembered
         }
         return await selectCLIAndOpen(target)
+    }
+    /// The project's remembered CLI (Main when none), or nil if it no longer exists.
+    func rememberedCLI(_ projectID: UUID) -> UUID? {
+        let target = lastCLIByProject[projectID.uuidString].flatMap(UUID.init(uuidString:)) ?? projectID
+        return controllers(in: projectID).contains { $0.id == target } ? target : nil
+    }
+    /// Select a project's remembered CLI for a row lifecycle action; reports when it no longer exists.
+    func selectRememberedCLI(_ projectID: UUID) -> Bool {
+        guard let id = rememberedCLI(projectID) else {
+            status = "The remembered CLI no longer exists. Select one of this project's CLI choices explicitly. Nothing was changed."
+            return false
+        }
+        return selectCLI(id, announce: false)
+    }
+    /// Row shortcut for the gear's Start Agent: starts exactly the remembered CLI and opens it.
+    func selectProjectAndStartCLI(_ projectID: UUID) async {
+        guard selectRememberedCLI(projectID) else { return }
+        await start()
     }
     /// Select the remembered CLI without launching or focusing Terminal.
     func selectProject(_ id: UUID) -> Bool {

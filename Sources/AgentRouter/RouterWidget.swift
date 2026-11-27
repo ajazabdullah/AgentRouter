@@ -76,7 +76,9 @@ struct RouterWidget: View {
             let message: String
             switch action {
             case .stop: message = "Request shutdown of \(project)? This sends SIGTERM to its verified controller group and may interrupt active work. No force stop follows automatically."
-            case .restart: message = "Restart \(project) with \(model.launchMode.title.lowercased())? Shutdown may interrupt active work. Restart proceeds only after the previous CLI exits."
+            case .restart: message = model.currentHealth?.paneID == nil
+                ? "Start a new \(project) session with \(model.launchMode.title.lowercased())? It has no running session, so nothing needs to be stopped."
+                : "Restart \(project) with \(model.launchMode.title.lowercased())? Shutdown may interrupt active work. Restart proceeds only after the previous CLI exits."
             case .force: message = "Force-stop \(project)? This sends SIGKILL to its verified controller group. Active work may be lost."
             case .remove: message = model.isAdditionalCLI ? "Remove only \(project)? Its agent must be stopped first. Other CLIs and project settings remain." : "Remove \(project) and all of its configured CLIs? All agents in this project must be stopped first. Repository files remain unchanged."
             case .startAndSend:
@@ -258,7 +260,8 @@ struct RouterWidget: View {
                     }.disabled(model.busy || model.fatal)
                     HStack {
                         Button("Stop") { confirmation = .stop }.disabled(model.currentHealth?.agentHealthy != true)
-                        Button("Restart") { confirmation = .restart }.disabled(model.currentHealth?.paneID == nil)
+                        Button("Restart") { confirmation = .restart }
+                            .disabled(model.currentHealth == nil || [.starting, .stopping].contains(model.currentHealth?.state ?? .stopped))
                         Menu("More") {
                             Button("Force Stop…", role: .destructive) { confirmation = .force }
                             Button(model.isAdditionalCLI ? "Remove This CLI…" : "Remove Project…", role: .destructive) { confirmation = .remove }
@@ -320,6 +323,36 @@ struct RouterWidget: View {
         }
     }
 
+    /// Go to CLI plus start / stop / restart icons for the project's remembered CLI.
+    @ViewBuilder private func rowLifecycleButtons(_ project: Project) -> some View {
+        let cli = model.rememberedCLI(project.id)
+        let state = cli.flatMap { model.health[$0]?.state }
+        let title = cli.map(model.cliTitle) ?? "CLI"
+        Button("Go to CLI") { Task { await model.selectProjectAndOpenCLI(project.id) } }
+            .controlSize(.regular).font(.system(size: 15))
+            .disabled(state != .running)
+            .help(cli == nil ? "The remembered CLI no longer exists. Select the project and choose one of its CLIs."
+                  : state == .running ? "Open " + title + " in Terminal" : title + " is not running. Start it first.")
+            .accessibilityLabel("Go to CLI for " + project.name)
+        if [.stopped, .failed, .disconnected].contains(state ?? .running) {
+            Button { Task { await model.selectProjectAndStartCLI(project.id) } } label: { Image(systemName: "play.fill") }
+                .controlSize(.regular).foregroundStyle(.green)
+                .help("Start " + title + " and open it in Terminal")
+                .accessibilityLabel("Start " + title + " for " + project.name)
+        }
+        if state == .running {
+            Button { if model.selectRememberedCLI(project.id) { confirmation = .stop } } label: { Image(systemName: "stop.fill") }
+                .controlSize(.regular)
+                .help("Stop " + title + " (asks first)")
+                .accessibilityLabel("Stop " + title + " for " + project.name)
+        }
+        if [.running, .failed, .disconnected].contains(state ?? .stopped) {
+            Button { if model.selectRememberedCLI(project.id) { confirmation = .restart } } label: { Image(systemName: "arrow.clockwise") }
+                .controlSize(.regular)
+                .help("Restart " + title + " (asks first)")
+                .accessibilityLabel("Restart " + title + " for " + project.name)
+        }
+    }
     private var settingsPage: some View {
         Group {
             card("Window behavior", icon: "macwindow") {
@@ -330,6 +363,10 @@ struct RouterWidget: View {
                 Toggle("Show floating AR circle over Terminal", isOn: $model.showFloatingCircle)
                 Text("Drag the circle to move it; click to show or hide AgentRouter. Its position is remembered.").font(.system(size: 15)).foregroundStyle(.secondary)
                 Text("When hidden, monitoring stays active. A temporary dot beside AR indicates a captured clipboard.").foregroundStyle(.secondary)
+            }
+            card("Notifications", icon: "bell") {
+                Toggle("Show reply preview in notifications", isOn: $model.showReplyPreviewInNotifications)
+                Text("Finished-turn notifications show the last sentence of the verified latest reply. The text is not saved in History, but macOS Notification Center keeps delivered notifications; use System Settings → Notifications → Show previews to hide them on the lock screen.").font(.system(size: 15)).foregroundStyle(.secondary)
             }
             card("Keyboard shortcuts", icon: "keyboard") {
                 Toggle("Project shortcuts: ⌥⌘1–9", isOn: $model.shortcuts)
@@ -384,10 +421,7 @@ struct RouterWidget: View {
                             }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain).help(project.name)
                             .accessibilityLabel("Select " + project.name)
-                        Button("Go to CLI") { Task { await model.selectProjectAndOpenCLI(project.id) } }
-                            .controlSize(.regular).font(.system(size: 15))
-                            .help("Open this project's remembered CLI in Terminal")
-                            .accessibilityLabel("Go to CLI for " + project.name)
+                        rowLifecycleButtons(project)
                         Button {
                             expandedProjectID = project.id
                             if model.selectProject(project.id) {
